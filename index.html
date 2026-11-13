@@ -1,0 +1,2202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>제7국경검문소 - 출입국 심사 시뮬레이션</title>
+  <style>
+    /* ==========================================================================
+       1. 전역 스타일 & 레트로 관료주의(CRT/픽셀) 테마 변수
+       ========================================================================== */
+    :root {
+      --bg-dark: #121512;
+      --bg-panel: #1c211c;
+      --bg-panel-alt: #242b24;
+      --border-light: #4a574a;
+      --border-dark: #0b0d0b;
+      --text-main: #d8dfd2;
+      --text-dim: #8c9685;
+      --accent-amber: #d9a74a;
+      --accent-green: #6db36b;
+      --accent-red: #d45252;
+      --paper-passport: #e6dcc5;
+      --paper-permit: #cde0e6;
+      --paper-citation: #f2d8d8;
+      --ink-dark: #1f1d1a;
+      --stamp-green: #1b7a36;
+      --stamp-red: #b02323;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Courier New', 'Malgun Gothic', 'Apple SD Gothic Neo', monospace;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* CRT 스캔라인 및 비네트 오버레이 */
+    .crt-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background:
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.22) 50%),
+        radial-gradient(circle at center, transparent 65%, rgba(0, 0, 0, 0.55) 100%);
+      background-size: 100% 4px, 100% 100%;
+    }
+
+    /* ==========================================================================
+       2. 상단 상태 바 (일차, 타이머, 크레딧, 경고 횟수)
+       ========================================================================== */
+    #top-bar {
+      height: 54px;
+      background: #171b17;
+      border-bottom: 3px solid var(--border-dark);
+      box-shadow: inset 0 -2px 0 var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      z-index: 100;
+    }
+
+    .brand-title {
+      font-weight: bold;
+      font-size: 1.05rem;
+      letter-spacing: 1px;
+      color: var(--accent-amber);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .stat-box {
+      background: #0f120f;
+      border: 2px solid var(--border-light);
+      padding: 4px 12px;
+      font-size: 0.92rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stat-label {
+      color: var(--text-dim);
+      font-size: 0.78rem;
+    }
+
+    .stat-val {
+      font-weight: bold;
+      color: var(--text-main);
+    }
+
+    .stat-val.credits { color: var(--accent-green); }
+    .stat-val.timer.urgent { color: var(--accent-red); animation: blink 0.8s infinite; }
+
+    .warning-pips {
+      display: flex;
+      gap: 4px;
+    }
+
+    .pip {
+      width: 14px;
+      height: 14px;
+      border: 1px solid #666;
+      background: #222;
+    }
+
+    .pip.active {
+      background: var(--accent-red);
+      border-color: #ff9494;
+      box-shadow: 0 0 6px var(--accent-red);
+    }
+
+    .btn-small {
+      background: var(--bg-panel-alt);
+      color: var(--text-main);
+      border: 2px solid var(--border-light);
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: bold;
+    }
+
+    .btn-small:hover {
+      background: #333d33;
+      border-color: var(--accent-amber);
+    }
+
+    /* ==========================================================================
+       3. 메인 작업 공간 (좌측: 심사 창구 & 규칙 수첩 / 우측: 심사 책상)
+       ========================================================================== */
+    #workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      height: calc(100vh - 54px);
+      overflow: hidden;
+    }
+
+    /* ---------------- 좌측 패널 ---------------- */
+    #left-panel {
+      background: var(--bg-panel);
+      border-right: 4px solid var(--border-dark);
+      box-shadow: inset -2px 0 0 var(--border-light);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* 심사 창구 영역 */
+    #booth-section {
+      padding: 14px;
+      border-bottom: 3px solid var(--border-dark);
+      background: linear-gradient(180deg, #161a16 0%, #202620 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .booth-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--text-dim);
+    }
+
+    .booth-window-wrap {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .portrait-frame {
+      position: relative;
+      width: 148px;
+      height: 148px;
+      background: #273027;
+      border: 3px solid #596659;
+      box-shadow: inset 0 0 18px rgba(0,0,0,0.8);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    #booth-canvas {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      display: block;
+    }
+
+    /* 창구 철창 및 셔터 */
+    .booth-bars {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 34px,
+        rgba(10, 12, 10, 0.45) 34px,
+        rgba(10, 12, 10, 0.45) 37px
+      );
+      pointer-events: none;
+    }
+
+    #booth-shutter {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        #2b302b,
+        #2b302b 10px,
+        #1c201c 10px,
+        #1c201c 14px
+      );
+      border-bottom: 4px solid #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent-amber);
+      font-weight: bold;
+      font-size: 0.85rem;
+      letter-spacing: 2px;
+      transform: translateY(-100%);
+      transition: transform 0.35s ease-in-out;
+      z-index: 5;
+    }
+
+    #booth-shutter.closed {
+      transform: translateY(0%);
+    }
+
+    /* 대사 창 */
+    .dialogue-box {
+      flex: 1;
+      background: #101410;
+      border: 2px solid var(--border-light);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 148px;
+    }
+
+    .dialogue-speaker {
+      font-size: 0.78rem;
+      color: var(--accent-amber);
+      font-weight: bold;
+      margin-bottom: 4px;
+      border-bottom: 1px dashed #394239;
+      padding-bottom: 3px;
+    }
+
+    #dialogue-text {
+      font-size: 0.88rem;
+      line-height: 1.45;
+      color: #e4ebe0;
+      flex: 1;
+    }
+
+    #feedback-banner {
+      margin-top: 6px;
+      padding: 4px 6px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      text-align: center;
+      display: none;
+    }
+
+    #feedback-banner.ok {
+      display: block;
+      background: rgba(56, 128, 56, 0.25);
+      border: 1px solid var(--accent-green);
+      color: #98e698;
+    }
+
+    #feedback-banner.bad {
+      display: block;
+      background: rgba(176, 35, 35, 0.28);
+      border: 1px solid var(--accent-red);
+      color: #ff9c9c;
+    }
+
+    /* ---------------- 규칙 수첩 탭 영역 ---------------- */
+    #rulebook-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #181c18;
+    }
+
+    .tab-bar {
+      display: flex;
+      background: #111411;
+      border-bottom: 2px solid var(--border-light);
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 9px 6px;
+      background: #191e19;
+      color: var(--text-dim);
+      border: none;
+      border-right: 1px solid #2e362e;
+      font-family: inherit;
+      font-size: 0.84rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .tab-btn:hover {
+      background: #232a23;
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      background: #2b332b;
+      color: var(--accent-amber);
+      box-shadow: inset 0 3px 0 var(--accent-amber);
+    }
+
+    .tab-content {
+      flex: 1;
+      padding: 14px;
+      overflow-y: auto;
+      display: none;
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .rule-card {
+      background: #222822;
+      border-left: 4px solid var(--accent-amber);
+      padding: 9px 11px;
+      margin-bottom: 10px;
+    }
+
+    .rule-card.new-rule {
+      border-left-color: var(--accent-red);
+      background: #2b2020;
+    }
+
+    .rule-badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 1px 5px;
+      background: var(--accent-red);
+      color: #fff;
+      font-weight: bold;
+      margin-right: 5px;
+    }
+
+    .city-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 0.82rem;
+    }
+
+    .city-table th, .city-table td {
+      border: 1px solid #3f4a3f;
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    .city-table th {
+      background: #262e26;
+      color: var(--accent-amber);
+    }
+
+    .log-item {
+      padding: 6px 8px;
+      border-bottom: 1px solid #2c332c;
+      font-size: 0.8rem;
+    }
+
+    .log-item.pass { color: #8fd18f; }
+    .log-item.fail { color: #f08989; }
+
+    /* ---------------- 우측 패널 (심사 책상 & 도장 도구) ---------------- */
+    #right-panel {
+      display: flex;
+      flex-direction: column;
+      background: #23201c;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 책상 상단 도구 바 (승인/거부 도장 버튼) */
+    #desk-toolbar {
+      height: 68px;
+      background: #1a1815;
+      border-bottom: 3px solid #0d0c0a;
+      box-shadow: inset 0 -2px 0 #3b362f;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 50;
+    }
+
+    .desk-hint {
+      font-size: 0.82rem;
+      color: #a89f91;
+    }
+
+    .stamp-controls {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .stamp-btn {
+      padding: 10px 22px;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 900;
+      letter-spacing: 1px;
+      border: 3px solid;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 0 #0b0a09;
+      transition: transform 0.08s, box-shadow 0.08s;
+    }
+
+    .stamp-btn:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #0b0a09;
+    }
+
+    .stamp-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .stamp-btn.approve {
+      background: #1d4a28;
+      border-color: #54b86d;
+      color: #a4f5b8;
+    }
+
+    .stamp-btn.approve:hover:not(:disabled) {
+      background: #256134;
+    }
+
+    .stamp-btn.deny {
+      background: #571d1d;
+      border-color: #d95757;
+      color: #ffb3b3;
+    }
+
+    .stamp-btn.deny:hover:not(:disabled) {
+      background: #732525;
+    }
+
+    /* 실제 서류가 놓이는 책상 표면 */
+    #desk-surface {
+      flex: 1;
+      position: relative;
+      background:
+        radial-gradient(circle at 50% 45%, #363029 0%, #24201b 75%, #191613 100%);
+      overflow: hidden;
+    }
+
+    /* 책상 바닥 각인 문구 */
+    .desk-watermark {
+      position: absolute;
+      bottom: 16px;
+      right: 20px;
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.08);
+      letter-spacing: 3px;
+      pointer-events: none;
+      font-weight: bold;
+    }
+
+    /* ==========================================================================
+       4. 서류 카드 스타일 (여권, 입국 허가증, 위반 경고장)
+       ========================================================================== */
+    .doc-card {
+      position: absolute;
+      color: var(--ink-dark);
+      box-shadow: 4px 8px 18px rgba(0, 0, 0, 0.65);
+      cursor: grab;
+      transition: box-shadow 0.15s;
+    }
+
+    .doc-card:active {
+      cursor: grabbing;
+      box-shadow: 8px 14px 26px rgba(0, 0, 0, 0.8);
+    }
+
+    /* ---------------- 여권 (PASSPORT) ---------------- */
+    .passport-doc {
+      width: 310px;
+      background: var(--paper-passport);
+      border: 3px solid #6e5d44;
+      border-radius: 4px;
+      padding: 12px;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(130,110,80,0.06) 0px, rgba(130,110,80,0.06) 1px, transparent 1px, transparent 6px);
+    }
+
+    .passport-top-banner {
+      background: #3d3326;
+      color: #e8d8b5;
+      text-align: center;
+      padding: 5px;
+      font-weight: bold;
+      font-size: 0.88rem;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      border: 1px solid #8a7554;
+    }
+
+    .passport-body {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .passport-photo-box {
+      width: 96px;
+      height: 108px;
+      border: 2px solid #594c38;
+      background: #bfb6a2;
+      flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #passport-canvas {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      filter: sepia(0.28) contrast(1.08);
+    }
+
+    .passport-fields {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 0.8rem;
+    }
+
+    .field-row {
+      border-bottom: 1px dotted #8f8068;
+      padding-bottom: 2px;
+    }
+
+    .field-label {
+      font-size: 0.66rem;
+      color: #695c49;
+      font-weight: bold;
+      display: block;
+    }
+
+    .field-value {
+      font-weight: bold;
+      font-size: 0.84rem;
+      color: #171512;
+    }
+
+    /* 도장 찍히는 구역 */
+    .passport-stamp-zone {
+      height: 74px;
+      border: 2px dashed #9c8d75;
+      background: rgba(255, 255, 255, 0.28);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 6px;
+    }
+
+    .stamp-zone-hint {
+      font-size: 0.72rem;
+      color: #8c7e68;
+      letter-spacing: 1px;
+    }
+
+    /* 찍힌 잉크 도장 시각 효과 */
+    .ink-stamp {
+      position: absolute;
+      padding: 5px 12px;
+      border: 4px solid;
+      font-weight: 900;
+      font-size: 1.05rem;
+      letter-spacing: 1px;
+      text-align: center;
+      transform: rotate(-7deg) scale(1.4);
+      opacity: 0;
+      pointer-events: none;
+      animation: stampSlam 0.22s forwards cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .ink-stamp.approved {
+      color: var(--stamp-green);
+      border-color: var(--stamp-green);
+    }
+
+    .ink-stamp.denied {
+      color: var(--stamp-red);
+      border-color: var(--stamp-red);
+    }
+
+    .ink-stamp-sub {
+      display: block;
+      font-size: 0.62rem;
+      margin-top: 2px;
+      letter-spacing: 0.5px;
+    }
+
+    .passport-mrz {
+      margin-top: 8px;
+      padding-top: 5px;
+      border-top: 1px solid #8f8068;
+      font-size: 0.68rem;
+      letter-spacing: 1.2px;
+      color: #4a4134;
+      text-align: center;
+    }
+
+    /* ---------------- 입국 허가증 (ENTRY PERMIT) ---------------- */
+    .permit-doc {
+      width: 280px;
+      background: var(--paper-permit);
+      border: 3px solid #486873;
+      padding: 12px;
+      background-image:
+        radial-gradient(circle at 85% 20%, rgba(72, 104, 115, 0.12) 0%, transparent 45%);
+    }
+
+    .permit-header {
+      border-bottom: 2px solid #355059;
+      padding-bottom: 6px;
+      margin-bottom: 9px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .permit-title {
+      font-weight: 900;
+      font-size: 0.92rem;
+      color: #1c343d;
+    }
+
+    .permit-seal {
+      width: 28px;
+      height: 28px;
+      border: 2px solid #355059;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: bold;
+      color: #355059;
+    }
+
+    .permit-body {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      font-size: 0.82rem;
+    }
+
+    .permit-footer {
+      margin-top: 10px;
+      padding-top: 6px;
+      border-top: 1px dashed #5c7d87;
+      font-size: 0.7rem;
+      color: #355059;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ---------------- 위반 경고장 (CITATION SLIP) ---------------- */
+    .citation-doc {
+      width: 300px;
+      background: var(--paper-citation);
+      border: 2px dashed #9e3333;
+      padding: 11px;
+      font-size: 0.8rem;
+      color: #3d1212;
+      animation: slidePrint 0.35s ease-out;
+    }
+
+    .citation-header {
+      font-weight: 900;
+      color: #a61c1c;
+      border-bottom: 2px solid #a61c1c;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ==========================================================================
+       5. 모달 화면 (시작 화면, 일일 정산, 게임 오버)
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 10, 8, 0.88);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+      padding: 20px;
+    }
+
+    .modal-backdrop.hidden {
+      display: none;
+    }
+
+    .modal-box {
+      width: 100%;
+      max-width: 520px;
+      background: #1b201b;
+      border: 4px solid var(--border-light);
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.9);
+      padding: 26px;
+      text-align: center;
+    }
+
+    .modal-emblem {
+      font-size: 2.2rem;
+      color: var(--accent-amber);
+      margin-bottom: 8px;
+    }
+
+    .modal-title {
+      font-size: 1.45rem;
+      font-weight: bold;
+      color: var(--accent-amber);
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+    }
+
+    .modal-desc {
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: var(--text-main);
+      margin-bottom: 18px;
+      text-align: left;
+      background: #131713;
+      padding: 14px;
+      border: 1px solid #353f35;
+    }
+
+    .settlement-table {
+      width: 100%;
+      margin: 14px 0 20px;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    .settlement-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #323b32;
+    }
+
+    .settlement-table td:first-child {
+      text-align: left;
+      color: var(--text-dim);
+    }
+
+    .settlement-table td:last-child {
+      text-align: right;
+      font-weight: bold;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 13px;
+      background: #2c4a2c;
+      border: 2px solid var(--accent-green);
+      color: #d9ffd9;
+      font-family: inherit;
+      font-size: 1.05rem;
+      font-weight: bold;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover {
+      background: #396139;
+    }
+
+    @keyframes stampSlam {
+      0% { transform: rotate(-7deg) scale(1.7); opacity: 0.2; }
+      100% { transform: rotate(-7deg) scale(1); opacity: 0.92; }
+    }
+
+    @keyframes slidePrint {
+      0% { transform: translateY(40px); opacity: 0; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    @media (max-width: 900px) {
+      #workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: 46% 54%;
+      }
+      #left-panel {
+        border-right: none;
+        border-bottom: 4px solid var(--border-dark);
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- CRT 스캔라인 효과 -->
+  <div class="crt-overlay"></div>
+
+  <!-- ========================================================================
+       상단 상태 바
+       ======================================================================== -->
+  <header id="top-bar">
+    <div class="brand-title">
+      <span>★ 제7국경검문소 (GRESTIN)</span>
+      <span id="date-display" style="font-size:0.85rem; color:#8c9685;">1982. 11. 23</span>
+    </div>
+
+    <div class="status-group">
+      <div class="stat-box">
+        <span class="stat-label">근무일</span>
+        <span class="stat-val" id="day-display">DAY 1</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">남은 시간</span>
+        <span class="stat-val timer" id="timer-display">01:20</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">보유 크레딧</span>
+        <span class="stat-val credits" id="credits-display">20 CR</span>
+      </div>
+      <div class="stat-box" title="경고 3회 누적 시 즉시 해고됩니다">
+        <span class="stat-label">경고</span>
+        <div class="warning-pips" id="warning-pips">
+          <div class="pip"></div>
+          <div class="pip"></div>
+          <div class="pip"></div>
+        </div>
+      </div>
+      <button class="btn-small" id="sound-toggle-btn">🔊 SFX ON</button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       메인 게임 화면 (좌측: 심사 창구 & 규칙 수첩 / 우측: 심사 책상)
+       ======================================================================== -->
+  <main id="workspace">
+    <!-- 좌측 패널 -->
+    <section id="left-panel">
+      <!-- 심사 창구 -->
+      <div id="booth-section">
+        <div class="booth-header">
+          <span>[심사 창구 #04]</span>
+          <span id="queue-counter">대기 인원: 상시 대기</span>
+        </div>
+
+        <div class="booth-window-wrap">
+          <div class="portrait-frame">
+            <canvas id="booth-canvas" width="64" height="64"></canvas>
+            <div class="booth-bars"></div>
+            <div id="booth-shutter" class="closed">창구 폐쇄</div>
+          </div>
+
+          <div class="dialogue-box">
+            <div>
+              <div class="dialogue-speaker" id="speaker-label">입국 대기자</div>
+              <div id="dialogue-text">근무 시작을 기다리는 중...</div>
+            </div>
+            <div id="feedback-banner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 규칙 수첩 탭 영역 -->
+      <div id="rulebook-section">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="tab-rules">📋 규칙 수첩</button>
+          <button class="tab-btn" data-tab="tab-cities">🗺️ 국가/도시</button>
+          <button class="tab-btn" data-tab="tab-log">🗂️ 심사 기록</button>
+        </div>
+
+        <!-- 탭 1: 오늘의 심사 규칙 -->
+        <div id="tab-rules" class="tab-content active"></div>
+
+        <!-- 탭 2: 등록된 국가 및 발급 도시 일람 -->
+        <div id="tab-cities" class="tab-content">
+          <p style="color:var(--text-dim); margin-bottom:8px;">
+            여권의 <strong>발급 도시(ISS)</strong>는 반드시 해당 국가의 공식 등록 도시와 일치해야 합니다.
+          </p>
+          <table class="city-table" id="city-table-body"></table>
+        </div>
+
+        <!-- 탭 3: 당일 심사 기록 -->
+        <div id="tab-log" class="tab-content">
+          <p style="color:var(--text-dim); margin-bottom:8px;">오늘 처리한 입국자 판정 내역입니다.</p>
+          <div id="log-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 우측 패널 (심사 책상) -->
+    <section id="right-panel">
+      <div id="desk-toolbar">
+        <div class="desk-hint">
+          💡 서류를 드래그해 펼쳐 보고 <strong>[규칙 수첩]</strong>과 대조한 뒤 도장을 찍으세요.
+        </div>
+        <div class="stamp-controls">
+          <button class="btn-small" id="arrange-btn" title="서류 위치 초기화">서류 정렬</button>
+          <button class="stamp-btn approve" id="btn-approve" disabled>✔ 승인 (APPROVED)</button>
+          <button class="stamp-btn deny" id="btn-deny" disabled>✖ 거부 (DENIED)</button>
+        </div>
+      </div>
+
+      <div id="desk-surface">
+        <div class="desk-watermark">MINISTRY OF ADMISSION // BORDER CHECKPOINT 07</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       모달 1: 게임 시작 화면
+       ======================================================================== -->
+  <div id="start-screen" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-emblem">🦅</div>
+      <div class="modal-title">아스토츠카 입국관리국</div>
+      <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:14px;">
+        그레스틴 제7국경검문소 심사관 임명 통지서
+      </p>
+      <div class="modal-desc">
+        <strong>[근무 지침]</strong><br><br>
+        1. 창구에 도착한 입국자의 <strong>실제 외모</strong>와 책상 위 <strong>제출 서류</strong>를 대조하십시오.<br>
+        2. <strong>[규칙 수첩]</strong>의 오늘 기준을 위반한 위조·결격 서류는 <strong>[거부]</strong> 도장을, 모든 조건이 일치하면 <strong>[승인]</strong> 도장을 여권에 찍으십시오.<br>
+        3. 정확한 심사 시 <strong>+10 CR</strong>이 지급되며, 오심 시 <strong>경고장</strong>이 발부됩니다. (경고 3회 누적 시 해고)<br>
+        4. 매일 새로운 입국 통제 규정이 추가됩니다. 아스토츠카에 영광을!
+      </div>
+      <button class="btn-primary" id="start-game-btn">검문소 셔터 열기 (업무 시작)</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       모달 2: 일일 정산 화면
+       ======================================================================== -->
+  <div id="eod-modal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-emblem">📑</div>
+      <div class="modal-title" id="eod-title">1일차 근무 종료 정산</div>
+      <table class="settlement-table" id="eod-table"></table>
+      <button class="btn-primary" id="next-day-btn">다음 일차 근무 시작</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       모달 3: 게임 오버 화면
+       ======================================================================== -->
+  <div id="gameover-modal" class="modal-backdrop hidden">
+    <div class="modal-box" style="border-color: var(--accent-red);">
+      <div class="modal-emblem" style="color: var(--accent-red);">✖</div>
+      <div class="modal-title" style="color: var(--accent-red);" id="gameover-title">직위 해제 통지</div>
+      <div class="modal-desc" id="gameover-reason"></div>
+      <button class="btn-primary" onclick="location.reload()">처음부터 다시 시작</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       게임 핵심 로직 (JavaScript)
+       ======================================================================== -->
+  <script>
+    /* ========================================================================
+       1. Web Audio API 사운드 합성 엔진 (외부 파일 없이 효과음 생성)
+       ======================================================================== */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioCtx();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      toggle() {
+        this.enabled = !this.enabled;
+        return this.enabled;
+      }
+
+      // 둔탁한 고무 도장 찍는 소리
+      playStamp() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+
+        // 저음 타격음
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(145, now);
+        osc.frequency.exponentialRampToValueAtTime(36, now + 0.14);
+
+        gain.gain.setValueAtTime(0.65, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.17);
+
+        // 스프링 철컥 노이즈
+        this.playNoiseBurst(0.07, 900, 0.25);
+      }
+
+      // 서류 집기/넘기는 사각거림
+      playPaper() {
+        if (!this.enabled) return;
+        this.init();
+        this.playNoiseBurst(0.11, 2200, 0.14);
+      }
+
+      // 입국자 대사 출력 비프음
+      playVoiceBeep(isFemale = false) {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'square';
+        const baseFreq = isFemale ? 270 : 165;
+        osc.frequency.setValueAtTime(baseFreq + (Math.random() * 35 - 17), now);
+
+        gain.gain.setValueAtTime(0.035, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+
+      // 경고장 도트 프린터 출력음
+      playCitation() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        for (let i = 0; i < 6; i++) {
+          const t = now + i * 0.065;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(i % 2 === 0 ? 520 : 390, t);
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.005, t + 0.05);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.055);
+        }
+      }
+
+      // 창구 셔터 개폐음
+      playShutter() {
+        if (!this.enabled) return;
+        this.init();
+        this.playNoiseBurst(0.28, 420, 0.22);
+      }
+
+      // 판정 성공 맑은 신호음
+      playSuccess() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        [440, 587].forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.12, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.18);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.2);
+        });
+      }
+
+      playNoiseBurst(duration, filterFreq, volume) {
+        const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = filterFreq;
+
+        const gain = this.ctx.createGain();
+        const now = this.ctx.currentTime;
+        gain.gain.setValueAtTime(volume, now);
+        gain.gain.exponentialRampToValueAtTime(0.005, now + duration);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+    }
+
+    const sfx = new SoundEngine();
+
+    /* ========================================================================
+       2. 세계관 데이터 (국가, 도시, 이름, 대사)
+       ======================================================================== */
+    const WORLD_DATA = {
+      nations: [
+        { code: 'ARZ', name: '아스토츠카', cities: ['동그레스틴', '오르베치', '파라디즈나'] },
+        { code: 'KOL', name: '콜레치아', cities: ['유르코 시티', '베도르', '서그레스틴'] },
+        { code: 'OBR', name: '오브리스탄', cities: ['스칼', '로른드', '메르그레드'] },
+        { code: 'ANT', name: '안테그리아', cities: ['세인트 마르메로', '글로리안', '아우터 그라우스'] },
+        { code: 'IMP', name: '임포르', cities: ['엔키오', '하이운코', '춘키오'] }
+      ],
+      fakeCities: ['노르드부르크', '벨라노바', '크라코비아', '오스트리아나', '산타 루시아'],
+      maleFirstNames: ['빅토르', '알렉세이', '이반', '드미트리', '보리스', '세르게이', '미하일', '니콜라이', '안톤', '파벨'],
+      femaleFirstNames: ['엘레나', '나타샤', '소피아', '카테리나', '안나', '올가', '타티아나', '마리아', '이리나', '스베틀라나'],
+      lastNames: ['코발스키', '볼코프', '노비코프', '모로조프', '페트로프', '소콜로프', '스미르노프', '레베데프', '코즐로프', '바실리예프'],
+      purposes: ['친척 방문', '단기 상업', '환승 경유', '노동 취업', '외교 업무'],
+      greetings: [
+        '좋은 날이오. 서류 여기 있소.',
+        '입국 심사를 받으러 왔습니다.',
+        '서류는 모두 챙겨왔습니다. 확인해 주시오.',
+        '아스토츠카에 볼일이 있어 왔습니다.',
+        '빨리 처리해 주시오. 기차 시간이 촉박하오.'
+      ],
+      missingPermitExcuses: [
+        '입국 허가증? 그런 서류가 필요하다는 얘긴 못 들었소.',
+        '허가증을 깜빡하고 숙소에 두고 왔습니다만...',
+        '여권만 있으면 통과시켜 주는 거 아니었소?'
+      ]
+    };
+
+    /* ========================================================================
+       3. 픽셀 아트 생성형 초상화 렌더러 (64x64 캔버스)
+       ======================================================================== */
+    class PortraitRenderer {
+      static generateAppearance(gender) {
+        const skins = ['#e0b899', '#cfa07e', '#b88563', '#edd0b7'];
+        const hairs = ['#1e1a17', '#3b281c', '#5c4b3b', '#7a7a78', '#8a4b2b'];
+        const coats = ['#2c3830', '#3a322d', '#2b3340', '#423b2c', '#332b38'];
+
+        const maleHairs = ['bald', 'short', 'parted', 'spiky'];
+        const femaleHairs = ['long', 'bun', 'parted', 'short'];
+
+        const hairPool = gender === 'M' ? maleHairs : femaleHairs;
+        const beardPool = gender === 'M' ? ['none', 'none', 'mustache', 'full'] : ['none'];
+
+        return {
+          gender,
+          skin: skins[Math.floor(Math.random() * skins.length)],
+          hairColor: hairs[Math.floor(Math.random() * hairs.length)],
+          coatColor: coats[Math.floor(Math.random() * coats.length)],
+          faceShape: ['normal', 'wide', 'narrow'][Math.floor(Math.random() * 3)],
+          hairStyle: hairPool[Math.floor(Math.random() * hairPool.length)],
+          hasGlasses: Math.random() < 0.35,
+          beardStyle: beardPool[Math.floor(Math.random() * beardPool.length)],
+          expression: ['neutral', 'stern', 'nervous'][Math.floor(Math.random() * 3)]
+        };
+      }
+
+      // 여권 사진 위조용: 원본 외모에서 뚜렷한 특징 2가지 이상을 변경
+      static createMismatchedAppearance(orig) {
+        const fake = { ...orig };
+        // 1) 안경 반전
+        fake.hasGlasses = !orig.hasGlasses;
+        // 2) 헤어스타일 대폭 변경
+        const allHairs = ['bald', 'short', 'long', 'bun', 'spiky'];
+        const otherHairs = allHairs.filter(h => h !== orig.hairStyle);
+        fake.hairStyle = otherHairs[Math.floor(Math.random() * otherHairs.length)];
+        // 3) 남성이면 수염도 변경
+        if (orig.gender === 'M') {
+          fake.beardStyle = orig.beardStyle === 'full' ? 'none' : 'full';
+        }
+        return fake;
+      }
+
+      static draw(canvas, app, isBlinking = false, isPhoto = false) {
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        // 배경
+        ctx.fillStyle = isPhoto ? '#c4baa6' : '#262e26';
+        ctx.fillRect(0, 0, 64, 64);
+
+        // 어깨 / 상의
+        ctx.fillStyle = app.coatColor;
+        ctx.fillRect(12, 48, 40, 16);
+        ctx.fillRect(16, 45, 32, 4);
+
+        // 목
+        ctx.fillStyle = app.skin;
+        ctx.fillRect(26, 39, 12, 8);
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.fillRect(26, 39, 12, 3);
+
+        // 뒷머리 (긴 머리일 경우 얼굴 뒤에 먼저 그림)
+        if (app.hairStyle === 'long') {
+          ctx.fillStyle = app.hairColor;
+          ctx.fillRect(16, 14, 32, 34);
+        } else if (app.hairStyle === 'bun') {
+          ctx.fillStyle = app.hairColor;
+          ctx.fillRect(25, 4, 14, 7);
+        }
+
+        // 얼굴형 크기 계산
+        let fx = 20, fw = 24;
+        if (app.faceShape === 'wide') { fx = 18; fw = 28; }
+        if (app.faceShape === 'narrow') { fx = 22; fw = 20; }
+
+        // 얼굴 베이스
+        ctx.fillStyle = app.skin;
+        ctx.fillRect(fx, 14, fw, 26);
+        ctx.fillRect(fx + 2, 40, fw - 4, 3);
+
+        // 귀
+        ctx.fillRect(fx - 2, 24, 2, 6);
+        ctx.fillRect(fx + fw, 24, 2, 6);
+
+        // 입체감 음영
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(fx + fw - 4, 15, 4, 25);
+
+        // 눈썹 & 눈
+        ctx.fillStyle = '#1a1715';
+        ctx.fillRect(24, 21, 5, 1);
+        ctx.fillRect(35, 21, 5, 1);
+
+        if (isBlinking && !isPhoto) {
+          ctx.fillRect(25, 24, 4, 1);
+          ctx.fillRect(35, 24, 4, 1);
+        } else {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(25, 23, 4, 2);
+          ctx.fillRect(35, 23, 4, 2);
+          ctx.fillStyle = '#141210';
+          ctx.fillRect(26, 23, 2, 2);
+          ctx.fillRect(36, 23, 2, 2);
+          // 여성 캐릭터 속눈썹 표현
+          if (app.gender === 'F') {
+            ctx.fillRect(24, 23, 1, 1);
+            ctx.fillRect(39, 23, 1, 1);
+          }
+        }
+
+        // 안경
+        if (app.hasGlasses) {
+          ctx.fillStyle = '#111111';
+          ctx.strokeStyle = '#111111';
+          // 좌우 테
+          ctx.fillRect(23, 22, 8, 1);
+          ctx.fillRect(23, 26, 8, 1);
+          ctx.fillRect(23, 22, 1, 5);
+          ctx.fillRect(30, 22, 1, 5);
+
+          ctx.fillRect(33, 22, 8, 1);
+          ctx.fillRect(33, 26, 8, 1);
+          ctx.fillRect(33, 22, 1, 5);
+          ctx.fillRect(40, 22, 1, 5);
+          // 브릿지
+          ctx.fillRect(31, 23, 2, 1);
+        }
+
+        // 코
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.fillRect(31, 25, 2, 6);
+        ctx.fillRect(30, 30, 4, 1);
+
+        // 수염
+        ctx.fillStyle = app.hairColor;
+        if (app.beardStyle === 'mustache') {
+          ctx.fillRect(27, 33, 10, 2);
+        } else if (app.beardStyle === 'full') {
+          ctx.fillRect(fx, 31, 3, 10);
+          ctx.fillRect(fx + fw - 3, 31, 3, 10);
+          ctx.fillRect(fx + 2, 37, fw - 4, 6);
+          ctx.fillRect(27, 33, 10, 2);
+        }
+
+        // 입
+        ctx.fillStyle = app.gender === 'F' ? '#8f3d3d' : '#4a2c24';
+        if (app.expression === 'stern') {
+          ctx.fillRect(28, 36, 8, 1);
+          ctx.fillRect(27, 37, 1, 1);
+          ctx.fillRect(36, 37, 1, 1);
+        } else if (app.expression === 'nervous') {
+          ctx.fillRect(29, 35, 6, 2);
+        } else {
+          ctx.fillRect(28, 35, 8, 1);
+        }
+
+        // 앞머리 / 헤어스타일
+        ctx.fillStyle = app.hairColor;
+        if (app.hairStyle === 'short') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx - 1, 13, 2, 7);
+          ctx.fillRect(fx + fw - 1, 13, 2, 7);
+        } else if (app.hairStyle === 'parted') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx, 15, 8, 3);
+          ctx.fillRect(fx - 1, 13, 2, 8);
+          ctx.fillRect(fx + fw - 1, 13, 2, 8);
+        } else if (app.hairStyle === 'long') {
+          ctx.fillRect(fx - 2, 10, fw + 4, 6);
+          ctx.fillRect(fx - 3, 14, 4, 30);
+          ctx.fillRect(fx + fw - 1, 14, 4, 30);
+        } else if (app.hairStyle === 'bun') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx - 1, 13, 2, 8);
+          ctx.fillRect(fx + fw - 1, 13, 2, 8);
+        } else if (app.hairStyle === 'spiky') {
+          ctx.fillRect(fx, 11, fw, 5);
+          for (let sx = fx + 1; sx < fx + fw - 2; sx += 4) {
+            ctx.fillRect(sx, 7, 3, 5);
+          }
+        }
+      }
+    }
+
+    /* ========================================================================
+       4. 날짜 유틸리티
+       ======================================================================== */
+    function formatDate(d) {
+      const mm = String(d.month).padStart(2, '0');
+      const dd = String(d.day).padStart(2, '0');
+      return `${d.year}.${mm}.${dd}`;
+    }
+
+    function addDays(baseDate, offsetDays) {
+      const dt = new Date(baseDate.year, baseDate.month - 1, baseDate.day + offsetDays);
+      return {
+        year: dt.getFullYear(),
+        month: dt.getMonth() + 1,
+        day: dt.getDate()
+      };
+    }
+
+    function isBeforeDate(target, current) {
+      const tVal = target.year * 10000 + target.month * 100 + target.day;
+      const cVal = current.year * 10000 + current.month * 100 + current.day;
+      return tVal < cVal;
+    }
+
+    /* ========================================================================
+       5. 입국자 & 서류 절차적 생성기 (결격 사유 자동 삽입)
+       ======================================================================== */
+    class EntrantGenerator {
+      static generate(day, currentDate, dailyDirectives) {
+        // 1. 기본 인적 사항 생성
+        const gender = Math.random() < 0.5 ? 'M' : 'F';
+        const firstNamePool = gender === 'M' ? WORLD_DATA.maleFirstNames : WORLD_DATA.femaleFirstNames;
+        const firstName = firstNamePool[Math.floor(Math.random() * firstNamePool.length)];
+        const lastName = WORLD_DATA.lastNames[Math.floor(Math.random() * WORLD_DATA.lastNames.length)];
+        const fullName = `${firstName} ${lastName}`;
+
+        const dob = {
+          year: 1938 + Math.floor(Math.random() * 26),
+          month: 1 + Math.floor(Math.random() * 12),
+          day: 1 + Math.floor(Math.random() * 28)
+        };
+
+        // 정상 국가/도시 선택 (3일차 이상이면 금지 국가/격리 도시를 피해 기본값 생성)
+        let validNations = WORLD_DATA.nations;
+        if (day >= 3 && dailyDirectives.bannedNation) {
+          validNations = validNations.filter(n => n.name !== dailyDirectives.bannedNation);
+        }
+        const nation = validNations[Math.floor(Math.random() * validNations.length)];
+
+        let validCities = nation.cities;
+        if (day >= 4 && dailyDirectives.quarantineCity) {
+          validCities = validCities.filter(c => c !== dailyDirectives.quarantineCity);
+        }
+        const city = validCities[Math.floor(Math.random() * validCities.length)];
+
+        const passportId = `${nation.code}-${10000 + Math.floor(Math.random() * 89999)}`;
+        const validExp = addDays(currentDate, 15 + Math.floor(Math.random() * 400));
+
+        // 실제 입국자 외모 생성
+        const liveAppearance = PortraitRenderer.generateAppearance(gender);
+        let photoAppearance = { ...liveAppearance };
+
+        // 기본 서류 데이터
+        const passport = {
+          name: fullName,
+          dob: formatDate(dob),
+          gender: gender,
+          nation: nation.name,
+          city: city,
+          id: passportId,
+          exp: validExp
+        };
+
+        let permit = null;
+        if (day >= 2) {
+          permit = {
+            name: fullName,
+            passportId: passportId,
+            purpose: WORLD_DATA.purposes[Math.floor(Math.random() * WORLD_DATA.purposes.length)],
+            exp: addDays(currentDate, 5 + Math.floor(Math.random() * 90))
+          };
+        }
+
+        let dialogue = WORLD_DATA.greetings[Math.floor(Math.random() * WORLD_DATA.greetings.length)];
+
+        // 2. 약 52% 확률로 결격 사유(모순점) 의도적 삽입
+        const hasDefect = Math.random() < 0.52;
+        let defectReason = null;
+
+        if (hasDefect) {
+          // 현재 일차에 유효한 결격 사유 풀 구성
+          const defectPool = [
+            'EXPIRED_PASSPORT',
+            'PHOTO_MISMATCH',
+            'GENDER_MISMATCH',
+            'INVALID_CITY'
+          ];
+
+          if (day >= 2) {
+            defectPool.push('MISSING_PERMIT', 'PERMIT_NAME_MISMATCH', 'PERMIT_ID_MISMATCH', 'PERMIT_EXPIRED');
+          }
+          if (day >= 3 && dailyDirectives.bannedNation) {
+            defectPool.push('BANNED_NATION', 'BANNED_NATION');
+          }
+          if (day >= 4 && dailyDirectives.quarantineCity) {
+            defectPool.push('QUARANTINE_CITY', 'QUARANTINE_CITY');
+          }
+
+          const chosenDefect = defectPool[Math.floor(Math.random() * defectPool.length)];
+
+          switch (chosenDefect) {
+            case 'EXPIRED_PASSPORT': {
+              const expiredDate = addDays(currentDate, -(5 + Math.floor(Math.random() * 180)));
+              passport.exp = expiredDate;
+              defectReason = `여권 유효기간 만료 (${formatDate(expiredDate)})`;
+              break;
+            }
+            case 'PHOTO_MISMATCH': {
+              photoAppearance = PortraitRenderer.createMismatchedAppearance(liveAppearance);
+              defectReason = '여권 사진과 실제 입국자 외모 불일치';
+              break;
+            }
+            case 'GENDER_MISMATCH': {
+              passport.gender = gender === 'M' ? 'F' : 'M';
+              defectReason = `여권 성별(${passport.gender})과 실제 입국자(${gender}) 불일치`;
+              break;
+            }
+            case 'INVALID_CITY': {
+              if (Math.random() < 0.5) {
+                const fakeCity = WORLD_DATA.fakeCities[Math.floor(Math.random() * WORLD_DATA.fakeCities.length)];
+                passport.city = fakeCity;
+                defectReason = `존재하지 않는 위조 발급 도시 (${fakeCity})`;
+              } else {
+                const otherNations = WORLD_DATA.nations.filter(n => n.name !== nation.name);
+                const wrongNation = otherNations[Math.floor(Math.random() * otherNations.length)];
+                const wrongCity = wrongNation.cities[0];
+                passport.city = wrongCity;
+                defectReason = `${nation.name} 소속이 아닌 발급 도시 (${wrongCity})`;
+              }
+              break;
+            }
+            case 'MISSING_PERMIT': {
+              permit = null;
+              dialogue = WORLD_DATA.missingPermitExcuses[Math.floor(Math.random() * WORLD_DATA.missingPermitExcuses.length)];
+              defectReason = '필수 서류(입국 허가증) 미제출';
+              break;
+            }
+            case 'PERMIT_NAME_MISMATCH': {
+              const otherLast = WORLD_DATA.lastNames.find(ln => ln !== lastName) || '크라브첸코';
+              permit.name = `${firstName} ${otherLast}`;
+              defectReason = `여권(${passport.name})과 입국 허가증(${permit.name}) 성명 불일치`;
+              break;
+            }
+            case 'PERMIT_ID_MISMATCH': {
+              const wrongNum = 10000 + Math.floor(Math.random() * 89999);
+              permit.passportId = `${nation.code}-${wrongNum}`;
+              if (permit.passportId === passport.id) permit.passportId += 'X';
+              defectReason = `여권 번호(${passport.id})와 허가증 번호(${permit.passportId}) 불일치`;
+              break;
+            }
+            case 'PERMIT_EXPIRED': {
+              const expPermit = addDays(currentDate, -(2 + Math.floor(Math.random() * 60)));
+              permit.exp = expPermit;
+              defectReason = `입국 허가증 유효기간 만료 (${formatDate(expPermit)})`;
+              break;
+            }
+            case 'BANNED_NATION': {
+              const bannedObj = WORLD_DATA.nations.find(n => n.name === dailyDirectives.bannedNation);
+              passport.nation = bannedObj.name;
+              passport.city = bannedObj.cities[0];
+              passport.id = `${bannedObj.code}-${10000 + Math.floor(Math.random() * 89999)}`;
+              if (permit) permit.passportId = passport.id;
+              defectReason = `금일 입국 금지 국가 국적자 (${bannedObj.name})`;
+              break;
+            }
+            case 'QUARANTINE_CITY': {
+              const qCity = dailyDirectives.quarantineCity;
+              const qNation = WORLD_DATA.nations.find(n => n.cities.includes(qCity));
+              passport.nation = qNation.name;
+              passport.city = qCity;
+              passport.id = `${qNation.code}-${10000 + Math.floor(Math.random() * 89999)}`;
+              if (permit) permit.passportId = passport.id;
+              defectReason = `전염병 격리 지정 도시(${qCity}) 출발자`;
+              break;
+            }
+          }
+        }
+
+        return {
+          isValid: !hasDefect,
+          defectReason,
+          liveAppearance,
+          photoAppearance,
+          passport,
+          permit,
+          dialogue
+        };
+      }
+    }
+
+    /* ========================================================================
+       6. 메인 게임 엔진 (상태 관리, 타이머, 서류 드래그, 도장 판정)
+       ======================================================================== */
+    class BorderGame {
+      constructor() {
+        this.baseDate = { year: 1982, month: 11, day: 23 };
+        this.day = 1;
+        this.credits = 20;
+        this.warnings = 0;
+        this.maxWarnings = 3;
+
+        this.shiftDuration = 80; // 하루 근무 시간 (초)
+        this.timeLeft = this.shiftDuration;
+        this.timerInterval = null;
+        this.blinkInterval = null;
+        this.typewriterInterval = null;
+
+        this.currentEntrant = null;
+        this.isProcessingStamp = false;
+        this.topZIndex = 10;
+
+        // 일일 통계
+        this.dailyStats = {
+          processed: 0,
+          correct: 0,
+          wrong: 0
+        };
+
+        this.dailyDirectives = {
+          bannedNation: null,
+          quarantineCity: null
+        };
+
+        this.bindUIEvents();
+        this.renderCityTable();
+      }
+
+      getCurrentDate() {
+        return addDays(this.baseDate, this.day - 1);
+      }
+
+      bindUIEvents() {
+        // 게임 시작 버튼
+        document.getElementById('start-game-btn').addEventListener('click', () => {
+          sfx.init();
+          document.getElementById('start-screen').classList.add('hidden');
+          this.startDay(1);
+        });
+
+        // 다음 날 진행 버튼
+        document.getElementById('next-day-btn').addEventListener('click', () => {
+          document.getElementById('eod-modal').classList.add('hidden');
+          this.startDay(this.day + 1);
+        });
+
+        // 사운드 토글
+        const soundBtn = document.getElementById('sound-toggle-btn');
+        soundBtn.addEventListener('click', () => {
+          const on = sfx.toggle();
+          soundBtn.textContent = on ? '🔊 SFX ON' : '🔇 SFX OFF';
+        });
+
+        // 규칙 수첩 탭 전환
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            sfx.playPaper();
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.tab).classList.add('active');
+          });
+        });
+
+        // 승인 / 거부 도장 버튼
+        document.getElementById('btn-approve').addEventListener('click', () => this.handleDecision(true));
+        document.getElementById('btn-deny').addEventListener('click', () => this.handleDecision(false));
+
+        // 서류 위치 초기화 버튼
+        document.getElementById('arrange-btn').addEventListener('click', () => {
+          sfx.playPaper();
+          this.arrangeDocuments();
+        });
+      }
+
+      // 국가 및 공식 도시 일람표 렌더링
+      renderCityTable() {
+        const table = document.getElementById('city-table-body');
+        let html = '<tr><th>소속 국가</th><th>공식 발급 도시</th></tr>';
+        WORLD_DATA.nations.forEach(n => {
+          html += `<tr><td><strong>${n.name}</strong></td><td>${n.cities.join(', ')}</td></tr>`;
+        });
+        table.innerHTML = html;
+      }
+
+      // 일차별 금지 국가 / 격리 도시 결정 및 규칙 수첩 갱신
+      setupDailyDirectives() {
+        this.dailyDirectives = { bannedNation: null, quarantineCity: null };
+
+        if (this.day >= 3) {
+          // 3일차부터 금지 국가 로테이션 (콜레치아 -> 안테그리아 -> 임포르 ...)
+          const foreignNations = WORLD_DATA.nations.filter(n => n.name !== '아스토츠카');
+          const banned = foreignNations[(this.day - 3) % foreignNations.length];
+          this.dailyDirectives.bannedNation = banned.name;
+        }
+
+        if (this.day >= 4) {
+          // 4일차부터 금지 국가가 아닌 도시 중 격리 구역 지정
+          const candidateNations = WORLD_DATA.nations.filter(n => n.name !== this.dailyDirectives.bannedNation);
+          const targetNation = candidateNations[this.day % candidateNations.length];
+          this.dailyDirectives.quarantineCity = targetNation.cities[(this.day + 1) % targetNation.cities.length];
+        }
+
+        this.renderRulebook();
+      }
+
+      renderRulebook() {
+        const container = document.getElementById('tab-rules');
+        const todayStr = formatDate(this.getCurrentDate());
+
+        let html = `
+          <div style="margin-bottom:10px; color:var(--accent-amber); font-weight:bold;">
+            📅 기준 일자: ${todayStr} (${this.day}일차 지침)
+          </div>
+          <div class="rule-card">
+            <strong>1. 유효 여권 필수</strong><br>
+            여권의 유효기간(EXP)이 <strong>${todayStr}</strong> 이상이어야 합니다.
+          </div>
+          <div class="rule-card">
+            <strong>2. 신원 및 사진 대조</strong><br>
+            여권 사진(헤어, 안경, 수염)과 <strong>성별(SEX)</strong>이 실제 입국자와 일치해야 합니다.
+          </div>
+          <div class="rule-card">
+            <strong>3. 공식 발급 도시 확인</strong><br>
+            발급 도시(ISS)는 [국가/도시] 탭에 등록된 해당 국가 도시여야 합니다.
+          </div>
+        `;
+
+        if (this.day >= 2) {
+          html += `
+            <div class="rule-card ${this.day === 2 ? 'new-rule' : ''}">
+              ${this.day === 2 ? '<span class="rule-badge">NEW</span>' : ''}
+              <strong>4. 입국 허가증 필수 지참</strong><br>
+              모든 입국자는 <strong>입국 허가증</strong>을 제출해야 하며, 성명·여권번호·유효기간이 일치해야 합니다.
+            </div>
+          `;
+        }
+
+        if (this.day >= 3 && this.dailyDirectives.bannedNation) {
+          html += `
+            <div class="rule-card new-rule">
+              <span class="rule-badge">긴급 통제</span>
+              <strong>5. 특정 국가 입국 전면 금지</strong><br>
+              외교 마찰로 인해 금일 <strong>[${this.dailyDirectives.bannedNation}]</strong> 국적자의 입국을 전면 거부하십시오.
+            </div>
+          `;
+        }
+
+        if (this.day >= 4 && this.dailyDirectives.quarantineCity) {
+          html += `
+            <div class="rule-card new-rule">
+              <span class="rule-badge">방역 지침</span>
+              <strong>6. 전염병 격리 구역 통제</strong><br>
+              발열 증세 확산으로 <strong>[${this.dailyDirectives.quarantineCity}]</strong> 발급 여권 소지자는 입국이 금지됩니다.
+            </div>
+          `;
+        }
+
+        container.innerHTML = html;
+      }
+
+      // 하루 근무 시작
+      startDay(dayNum) {
+        this.day = dayNum;
+        this.timeLeft = this.shiftDuration;
+        this.dailyStats = { processed: 0, correct: 0, wrong: 0 };
+        document.getElementById('log-list').innerHTML = '';
+
+        this.setupDailyDirectives();
+        this.updateTopBar();
+        this.startShiftTimer();
+        this.startBlinkLoop();
+        this.callNextEntrant();
+      }
+
+      updateTopBar() {
+        document.getElementById('day-display').textContent = `DAY ${this.day}`;
+        document.getElementById('date-display').textContent = formatDate(this.getCurrentDate());
+        document.getElementById('credits-display').textContent = `${this.credits} CR`;
+
+        const timerEl = document.getElementById('timer-display');
+        const mins = String(Math.floor(this.timeLeft / 60)).padStart(2, '0');
+        const secs = String(this.timeLeft % 60).padStart(2, '0');
+        timerEl.textContent = `${mins}:${secs}`;
+        timerEl.classList.toggle('urgent', this.timeLeft <= 15);
+
+        const pips = document.querySelectorAll('#warning-pips .pip');
+        pips.forEach((pip, idx) => {
+          pip.classList.toggle('active', idx < this.warnings);
+        });
+      }
+
+      startShiftTimer() {
+        clearInterval(this.timerInterval);
+        this.timerInterval = setInterval(() => {
+          this.timeLeft--;
+          this.updateTopBar();
+          if (this.timeLeft <= 0) {
+            clearInterval(this.timerInterval);
+            this.endDay();
+          }
+        }, 1000);
+      }
+
+      // 입국자 눈 깜빡임 애니메이션
+      startBlinkLoop() {
+        clearInterval(this.blinkInterval);
+        this.blinkInterval = setInterval(() => {
+          if (!this.currentEntrant) return;
+          const canvas = document.getElementById('booth-canvas');
+          PortraitRenderer.draw(canvas, this.currentEntrant.liveAppearance, true, false);
+          setTimeout(() => {
+            if (this.currentEntrant) {
+              PortraitRenderer.draw(canvas, this.currentEntrant.liveAppearance, false, false);
+            }
+          }, 140);
+        }, 3200);
+      }
+
+      // 다음 입국자 호출 및 서류 책상 배치
+      callNextEntrant() {
+        if (this.timeLeft <= 0) return;
+
+        this.isProcessingStamp = false;
+        this.clearDesk();
+
+        const feedback = document.getElementById('feedback-banner');
+        feedback.className = '';
+        feedback.style.display = 'none';
+
+        const shutter = document.getElementById('booth-shutter');
+        shutter.classList.add('closed');
+        sfx.playShutter();
+
+        setTimeout(() => {
+          this.currentEntrant = EntrantGenerator.generate(
+            this.day,
+            this.getCurrentDate(),
+            this.dailyDirectives
+          );
+
+          // 창구 초상화 렌더링
+          const boothCanvas = document.getElementById('booth-canvas');
+          PortraitRenderer.draw(boothCanvas, this.currentEntrant.liveAppearance, false, false);
+
+          shutter.classList.remove('closed');
+          document.getElementById('speaker-label').textContent = `입국자 #${this.dailyStats.processed + 1}`;
+          this.typeDialogue(this.currentEntrant.dialogue, this.currentEntrant.liveAppearance.gender === 'F');
+
+          // 책상 위 서류 생성
+          this.spawnDocumentsOnDesk(this.currentEntrant);
+
+          document.getElementById('btn-approve').disabled = false;
+          document.getElementById('btn-deny').disabled = false;
+        }, 380);
+      }
+
+      // 타자기 효과 대사 출력
+      typeDialogue(text, isFemale) {
+        clearInterval(this.typewriterInterval);
+        const el = document.getElementById('dialogue-text');
+        el.textContent = '';
+        let i = 0;
+        this.typewriterInterval = setInterval(() => {
+          if (i < text.length) {
+            el.textContent += text[i];
+            if (i % 2 === 0 && text[i] !== ' ') {
+              sfx.playVoiceBeep(isFemale);
+            }
+            i++;
+          } else {
+            clearInterval(this.typewriterInterval);
+          }
+        }, 32);
+      }
+
+      clearDesk() {
+        const desk = document.getElementById('desk-surface');
+        desk.querySelectorAll('.doc-card').forEach(el => el.remove());
+      }
+
+      // 서류를 책상 위에 생성 및 드래그 가능하게 연결
+      spawnDocumentsOnDesk(entrant) {
+        const desk = document.getElementById('desk-surface');
+        sfx.playPaper();
+
+        // 1. 여권 생성
+        const p = entrant.passport;
+        const passportEl = document.createElement('div');
+        passportEl.className = 'doc-card passport-doc';
+        passportEl.id = 'doc-passport';
+        passportEl.style.left = '36px';
+        passportEl.style.top = '28px';
+        passportEl.style.zIndex = ++this.topZIndex;
+
+        passportEl.innerHTML = `
+          <div class="passport-top-banner">${p.nation} 여권 // PASSPORT</div>
+          <div class="passport-body">
+            <div class="passport-photo-box">
+              <canvas id="passport-canvas" width="64" height="64"></canvas>
+            </div>
+            <div class="passport-fields">
+              <div class="field-row">
+                <span class="field-label">성명 (NAME)</span>
+                <span class="field-value">${p.name}</span>
+              </div>
+              <div class="field-row" style="display:flex; justify-content:space-between;">
+                <div>
+                  <span class="field-label">생년월일 (DOB)</span>
+                  <span class="field-value">${p.dob}</span>
+                </div>
+                <div>
+                  <span class="field-label">성별 (SEX)</span>
+                  <span class="field-value">${p.gender}</span>
+                </div>
+              </div>
+              <div class="field-row">
+                <span class="field-label">발급 도시 (ISS)</span>
+                <span class="field-value">${p.city}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">유효기간 (EXP)</span>
+                <span class="field-value">${formatDate(p.exp)}</span>
+              </div>
+            </div>
+          </div>
+          <div class="passport-stamp-zone" id="passport-stamp-zone">
+            <span class="stamp-zone-hint">[ 입국 심사 날인란 ]</span>
+          </div>
+          <div class="passport-mrz">
+            ID: <strong>${p.id}</strong> &lt;&lt; ${p.nation}
+          </div>
+        `;
+
+        desk.appendChild(passportEl);
+        this.makeDraggable(passportEl);
+
+        // 여권 사진 그리기
+        const passCanvas = passportEl.querySelector('#passport-canvas');
+        PortraitRenderer.draw(passCanvas, entrant.photoAppearance, false, true);
+
+        // 2. 입국 허가증 생성 (2일차 이상 & 제출한 경우)
+        if (entrant.permit) {
+          const pm = entrant.permit;
+          const permitEl = document.createElement('div');
+          permitEl.className = 'doc-card permit-doc';
+          permitEl.id = 'doc-permit';
+          permitEl.style.left = '375px';
+          permitEl.style.top = '46px';
+          permitEl.style.zIndex = ++this.topZIndex;
+
+          permitEl.innerHTML = `
+            <div class="permit-header">
+              <div>
+                <div style="font-size:0.65rem; color:#355059;">아스토츠카 입국관리국</div>
+                <div class="permit-title">입국 허가증 (ENTRY PERMIT)</div>
+              </div>
+              <div class="permit-seal">MOA</div>
+            </div>
+            <div class="permit-body">
+              <div class="field-row">
+                <span class="field-label">허가 대상자 성명</span>
+                <span class="field-value">${pm.name}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">여권 번호 (PASSPORT NO.)</span>
+                <span class="field-value">${pm.passportId}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">입국 목적 (PURPOSE)</span>
+                <span class="field-value">${pm.purpose}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">허가 만료일 (VALID UNTIL)</span>
+                <span class="field-value">${formatDate(pm.exp)}</span>
+              </div>
+            </div>
+            <div class="permit-footer">
+              <span>GRESTIN CHECKPOINT</span>
+              <span>OFFICIAL FORM 1982</span>
+            </div>
+          `;
+
+          desk.appendChild(permitEl);
+          this.makeDraggable(permitEl);
+        }
+      }
+
+      arrangeDocuments() {
+        const passport = document.getElementById('doc-passport');
+        const permit = document.getElementById('doc-permit');
+        if (passport) {
+          passport.style.left = '36px';
+          passport.style.top = '28px';
+        }
+        if (permit) {
+          permit.style.left = '375px';
+          permit.style.top = '46px';
+        }
+      }
+
+      // 책상 내 서류 드래그 앤 드롭 구현
+      makeDraggable(el) {
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let origLeft = 0, origTop = 0;
+
+        const onDown = (clientX, clientY) => {
+          isDragging = true;
+          el.style.zIndex = ++this.topZIndex;
+          sfx.playPaper();
+          startX = clientX;
+          startY = clientY;
+          origLeft = el.offsetLeft;
+          origTop = el.offsetTop;
+        };
+
+        const onMove = (clientX, clientY) => {
+          if (!isDragging) return;
+          const desk = document.getElementById('desk-surface');
+          const maxLeft = Math.max(0, desk.clientWidth - el.offsetWidth);
+          const maxTop = Math.max(0, desk.clientHeight - el.offsetHeight);
+
+          const nextLeft = Math.min(maxLeft, Math.max(0, origLeft + (clientX - startX)));
+          const nextTop = Math.min(maxTop, Math.max(0, origTop + (clientY - startY)));
+
+          el.style.left = `${nextLeft}px`;
+          el.style.top = `${nextTop}px`;
+        };
+
+        const onUp = () => {
+          isDragging = false;
+        };
+
+        el.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          onDown(e.clientX, e.clientY);
+        });
+        window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', onUp);
+
+        el.addEventListener('touchstart', (e) => {
+          const t = e.touches[0];
+          onDown(t.clientX, t.clientY);
+        }, { passive: true });
+        window.addEventListener('touchmove', (e) => {
+          if (!isDragging) return;
+          const t = e.touches[0];
+          onMove(t.clientX, t.clientY);
+        }, { passive: true });
+        window.addEventListener('touchend', onUp);
+      }
+
+      // 승인(true) 또는 거부(false) 도장 찍기 및 판정 처리
+      handleDecision(approved) {
+        if (this.isProcessingStamp || !this.currentEntrant) return;
+        this.isProcessingStamp = true;
+
+        document.getElementById('btn-approve').disabled = true;
+        document.getElementById('btn-deny').disabled = true;
+
+        // 1. 여권에 잉크 도장 찍기
+        sfx.playStamp();
+        const stampZone = document.getElementById('passport-stamp-zone');
+        if (stampZone) {
+          stampZone.innerHTML = `
+            <div class="ink-stamp ${approved ? 'approved' : 'denied'}">
+              ${approved ? 'APPROVED' : 'DENIED'}
+              <span class="ink-stamp-sub">GRESTIN // ${formatDate(this.getCurrentDate())}</span>
+            </div>
+          `;
+        }
+
+        // 2. 정오답 판정
+        const isCorrect = (approved === this.currentEntrant.isValid);
+        this.dailyStats.processed++;
+
+        const feedback = document.getElementById('feedback-banner');
+        const logList = document.getElementById('log-list');
+        const logItem = document.createElement('div');
+
+        if (isCorrect) {
+          this.dailyStats.correct++;
+          this.credits += 10;
+          sfx.playSuccess();
+
+          feedback.className = 'ok';
+          feedback.textContent = `✔ 판정 정확 (+10 CR) - ${approved ? '입국 승인' : '입국 거부'}`;
+
+          this.typeDialogue(
+            approved ? '감사합니다! 아스토츠카에 영광을!' : '젠장... 알겠소, 돌아가겠소.',
+            this.currentEntrant.liveAppearance.gender === 'F'
+          );
+
+          logItem.className = 'log-item pass';
+          logItem.textContent = `[정확] ${this.currentEntrant.passport.name} (${approved ? '승인' : '거부'}) +10 CR`;
+        } else {
+          this.dailyStats.wrong++;
+          this.warnings++;
+          sfx.playCitation();
+
+          const violationText = approved
+            ? `결격자 부당 승인: ${this.currentEntrant.defectReason}`
+            : `적격자 부당 거부: 결격 사유 없음`;
+
+          feedback.className = 'bad';
+          feedback.textContent = `✖ 경고장 발부 (${this.warnings}/${this.maxWarnings})`;
+
+          this.printCitation(violationText);
+
+          logItem.className = 'log-item fail';
+          logItem.textContent = `[오심] ${this.currentEntrant.passport.name} - ${violationText}`;
+        }
+
+        logList.prepend(logItem);
+        this.updateTopBar();
+
+        // 3. 경고 3회 누적 시 즉시 해고(게임 오버) 체크
+        if (this.warnings >= this.maxWarnings) {
+          setTimeout(() => {
+            clearInterval(this.timerInterval);
+            this.triggerGameOver(
+              '규정 위반 경고 3회 누적',
+              '입국관리국은 반복된 심사 과실로 귀하의 심사관 자격을 즉각 박탈합니다. 후임 심사관이 배치될 예정입니다.'
+            );
+          }, 1500);
+          return;
+        }
+
+        // 4. 잠시 후 다음 입국자 호출
+        setTimeout(() => {
+          if (this.timeLeft > 0) {
+            this.callNextEntrant();
+          }
+        }, isCorrect ? 1250 : 2100);
+      }
+
+      // 책상 위에 위반 경고장(Citation) 출력
+      printCitation(reason) {
+        const desk = document.getElementById('desk-surface');
+        const cite = document.createElement('div');
+        cite.className = 'doc-card citation-doc';
+        cite.style.left = '210px';
+        cite.style.bottom = '24px';
+        cite.style.zIndex = ++this.topZIndex;
+
+        cite.innerHTML = `
+          <div class="citation-header">
+            <span>M.O.A. 위반 경고장</span>
+            <span>경고 ${this.warnings} / ${this.maxWarnings}</span>
+          </div>
+          <div style="line-height:1.45;">
+            <strong>위반 사유:</strong><br>
+            ${reason}<br>
+            <span style="font-size:0.72rem; color:#7a2424;">
+              ※ 경고 3회 누적 시 심사관 직위가 즉시 해제됩니다.
+            </span>
+          </div>
+        `;
+        desk.appendChild(cite);
+        this.makeDraggable(cite);
+      }
+
+      // 하루 근무 종료 및 정산 모달 표시
+      endDay() {
+        document.getElementById('btn-approve').disabled = true;
+        document.getElementById('btn-deny').disabled = true;
+        document.getElementById('booth-shutter').classList.add('closed');
+        sfx.playShutter();
+
+        const earned = this.dailyStats.correct * 10;
+        const livingCost = 15; // 매일 식비 및 난방비 공제
+        const prevCredits = this.credits - earned;
+        this.credits -= livingCost;
+        this.updateTopBar();
+
+        document.getElementById('eod-title').textContent = `${this.day}일차 근무 종료 정산`;
+        document.getElementById('eod-table').innerHTML = `
+          <tr><td>심사 처리 인원</td><td>총 ${this.dailyStats.processed}명 (정확 ${this.dailyStats.correct} / 오심 ${this.dailyStats.wrong})</td></tr>
+          <tr><td>이전 보유 크레딧</td><td>${prevCredits} CR</td></tr>
+          <tr><td>금일 심사 수당 (+10 CR × ${this.dailyStats.correct})</td><td style="color:var(--accent-green);">+${earned} CR</td></tr>
+          <tr><td>가족 생계비 (식비·난방비)</td><td style="color:var(--accent-red);">-${livingCost} CR</td></tr>
+          <tr><td>누적 경고 횟수</td><td>${this.warnings} / ${this.maxWarnings}</td></tr>
+          <tr style="font-size:1.05rem;"><td><strong>최종 잔여 크레딧</strong></td><td style="color:${this.credits < 0 ? 'var(--accent-red)' : 'var(--accent-amber)'};">${this.credits} CR</td></tr>
+        `;
+
+        if (this.credits < 0) {
+          this.triggerGameOver(
+            '생계 유지 실패 (크레딧 파산)',
+            '잔여 크레딧이 부족하여 가족의 식비와 난방비를 감당할 수 없게 되었습니다. 검문소 근무가 종료됩니다.'
+          );
+          return;
+        }
+
+        document.getElementById('eod-modal').classList.remove('hidden');
+      }
+
+      triggerGameOver(title, reason) {
+        document.getElementById('gameover-title').textContent = title;
+        document.getElementById('gameover-reason').innerHTML = `
+          <strong>${reason}</strong><br><br>
+          • 최종 생존 일차: <strong>${this.day}일차</strong><br>
+          • 최종 보유 크레딧: <strong>${this.credits} CR</strong>
+        `;
+        document.getElementById('gameover-modal').classList.remove('hidden');
+      }
+    }
+
+    // 페이지 로드 시 게임 인스턴스 초기화
+    window.addEventListener('DOMContentLoaded', () => {
+      window.game = new BorderGame();
+    });
+  </script>
+</body>
+</html>
