@@ -1,0 +1,2787 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>제9격리구역: 최후의 방벽 - 바이러스 검문 시뮬레이션</title>
+  <style>
+    /* ==========================================================================
+       1. 전역 스타일 & 바이오하자드 벙커(CRT/픽셀) 테마 변수
+       ========================================================================== */
+    :root {
+      --bg-dark: #0e120f;
+      --bg-panel: #161c17;
+      --bg-panel-alt: #1f2720;
+      --border-light: #435446;
+      --border-dark: #080a08;
+      --text-main: #d5e0d6;
+      --text-dim: #849687;
+      --accent-amber: #e0a83b;
+      --accent-bio: #64d478;
+      --accent-red: #e04848;
+      --accent-cyan: #57c2d6;
+      --paper-id: #dfd9c8;
+      --paper-med: #cce3db;
+      --paper-note: #f0e6b6;
+      --paper-citation: #f2cccc;
+      --ink-dark: #181a18;
+      --stamp-green: #187a34;
+      --stamp-red: #b51f1f;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Courier New', 'Malgun Gothic', 'Apple SD Gothic Neo', monospace;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* CRT 스캔라인 및 방역 경고 비네트 */
+    .crt-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background:
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.24) 50%),
+        radial-gradient(circle at center, transparent 62%, rgba(0, 0, 0, 0.6) 100%);
+      background-size: 100% 4px, 100% 100%;
+    }
+
+    /* 비상 경보 플래시 효과 */
+    body.emergency-mode .crt-overlay {
+      box-shadow: inset 0 0 65px rgba(224, 40, 40, 0.55);
+      animation: alarmPulse 0.7s infinite;
+    }
+
+    /* ==========================================================================
+       2. 상단 상태 바
+       ========================================================================== */
+    #top-bar {
+      height: 54px;
+      background: #121713;
+      border-bottom: 3px solid var(--border-dark);
+      box-shadow: inset 0 -2px 0 var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 100;
+    }
+
+    .brand-title {
+      font-weight: bold;
+      font-size: 1rem;
+      letter-spacing: 1px;
+      color: var(--accent-amber);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hazard-tag {
+      background: repeating-linear-gradient(
+        -45deg,
+        #d99b26,
+        #d99b26 6px,
+        #181818 6px,
+        #181818 12px
+      );
+      color: #fff;
+      text-shadow: 1px 1px 2px #000;
+      padding: 2px 8px;
+      font-size: 0.74rem;
+      font-weight: 900;
+      border: 1px solid #d99b26;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .stat-box {
+      background: #0b0e0c;
+      border: 2px solid var(--border-light);
+      padding: 4px 10px;
+      font-size: 0.88rem;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .stat-label {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+    }
+
+    .stat-val {
+      font-weight: bold;
+      color: var(--text-main);
+    }
+
+    .stat-val.credits { color: var(--accent-bio); }
+    .stat-val.timer.urgent { color: var(--accent-red); animation: blink 0.8s infinite; }
+
+    .warning-pips {
+      display: flex;
+      gap: 4px;
+    }
+
+    .pip {
+      width: 13px;
+      height: 13px;
+      border: 1px solid #5a6b5d;
+      background: #1d241e;
+    }
+
+    .pip.active {
+      background: var(--accent-red);
+      border-color: #ff9e9e;
+      box-shadow: 0 0 7px var(--accent-red);
+    }
+
+    .btn-small {
+      background: var(--bg-panel-alt);
+      color: var(--text-main);
+      border: 2px solid var(--border-light);
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+
+    .btn-small:hover:not(:disabled) {
+      background: #2c382e;
+      border-color: var(--accent-amber);
+    }
+
+    .btn-small:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* ==========================================================================
+       3. 메인 작업 공간 (좌측: 격리 창구 & 수첩/인터콤 / 우측: 검문 책상)
+       ========================================================================== */
+    #workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 440px 1fr;
+      height: calc(100vh - 54px);
+      overflow: hidden;
+    }
+
+    /* ---------------- 좌측 패널 ---------------- */
+    #left-panel {
+      background: var(--bg-panel);
+      border-right: 4px solid var(--border-dark);
+      box-shadow: inset -2px 0 0 var(--border-light);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* 격리 검문 창구 */
+    #booth-section {
+      padding: 12px 14px;
+      border-bottom: 3px solid var(--border-dark);
+      background: linear-gradient(180deg, #121713 0%, #1b241d 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .booth-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .booth-window-wrap {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .portrait-column {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 146px;
+      flex-shrink: 0;
+    }
+
+    .portrait-frame {
+      position: relative;
+      width: 146px;
+      height: 146px;
+      background: #1e2620;
+      border: 3px solid #526656;
+      box-shadow: inset 0 0 18px rgba(0,0,0,0.85);
+      overflow: hidden;
+    }
+
+    #booth-canvas {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      display: block;
+    }
+
+    /* 강화 유리 격자 및 강철 방역 셔터 */
+    .booth-bars {
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(90deg, transparent, transparent 34px, rgba(8, 12, 9, 0.42) 34px, rgba(8, 12, 9, 0.42) 37px),
+        repeating-linear-gradient(0deg, transparent, transparent 34px, rgba(8, 12, 9, 0.25) 34px, rgba(8, 12, 9, 0.25) 36px);
+      pointer-events: none;
+    }
+
+    #booth-shutter {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        #262e28,
+        #262e28 10px,
+        #171c18 10px,
+        #171c18 14px
+      );
+      border-bottom: 4px solid #0c0e0c;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent-amber);
+      font-weight: bold;
+      font-size: 0.82rem;
+      letter-spacing: 1.5px;
+      transform: translateY(-100%);
+      transition: transform 0.32s ease-in-out;
+      z-index: 5;
+    }
+
+    #booth-shutter.closed {
+      transform: translateY(0%);
+    }
+
+    /* 생체 스캐너 버튼 & 결과창 */
+    .scan-btn {
+      width: 100%;
+      padding: 6px;
+      background: #17332b;
+      border: 2px solid var(--accent-cyan);
+      color: #b8f5ff;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .scan-btn:hover:not(:disabled) {
+      background: #204a3e;
+    }
+
+    .scan-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* 대사 및 생체 스캔 모니터 */
+    .dialogue-box {
+      flex: 1;
+      background: #0d120e;
+      border: 2px solid var(--border-light);
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 178px;
+    }
+
+    .dialogue-speaker {
+      font-size: 0.78rem;
+      color: var(--accent-amber);
+      font-weight: bold;
+      margin-bottom: 4px;
+      border-bottom: 1px dashed #344236;
+      padding-bottom: 3px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    #dialogue-text {
+      font-size: 0.85rem;
+      line-height: 1.42;
+      color: #e1ebe2;
+      flex: 1;
+    }
+
+    /* 생체 스캔 데이터 박스 */
+    #scan-result-box {
+      margin-top: 6px;
+      padding: 5px 7px;
+      background: #10211d;
+      border: 1px solid var(--accent-cyan);
+      font-size: 0.76rem;
+      color: #9be8f5;
+      display: none;
+      line-height: 1.35;
+    }
+
+    #scan-result-box.danger {
+      background: #2b1212;
+      border-color: var(--accent-red);
+      color: #ff9c9c;
+    }
+
+    #feedback-banner {
+      margin-top: 6px;
+      padding: 4px 6px;
+      font-size: 0.78rem;
+      font-weight: bold;
+      text-align: center;
+      display: none;
+    }
+
+    #feedback-banner.ok {
+      display: block;
+      background: rgba(56, 128, 56, 0.25);
+      border: 1px solid var(--accent-bio);
+      color: #9ef2ad;
+    }
+
+    #feedback-banner.bad {
+      display: block;
+      background: rgba(176, 35, 35, 0.3);
+      border: 1px solid var(--accent-red);
+      color: #ff9c9c;
+    }
+
+    /* ---------------- 규칙 수첩 & 내부 인터콤 탭 ---------------- */
+    #rulebook-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #131814;
+    }
+
+    .tab-bar {
+      display: flex;
+      background: #0d110e;
+      border-bottom: 2px solid var(--border-light);
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 8px 4px;
+      background: #151b16;
+      color: var(--text-dim);
+      border: none;
+      border-right: 1px solid #28332a;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: bold;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .tab-btn:hover {
+      background: #1e2620;
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      background: #253027;
+      color: var(--accent-amber);
+      box-shadow: inset 0 3px 0 var(--accent-amber);
+    }
+
+    .tab-badge {
+      display: inline-block;
+      background: var(--accent-red);
+      color: #fff;
+      font-size: 0.68rem;
+      padding: 0 5px;
+      border-radius: 8px;
+      margin-left: 3px;
+      animation: blink 1s infinite;
+    }
+
+    .tab-content {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+      display: none;
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .rule-card {
+      background: #1c241e;
+      border-left: 4px solid var(--accent-amber);
+      padding: 8px 10px;
+      margin-bottom: 9px;
+    }
+
+    .rule-card.new-rule {
+      border-left-color: var(--accent-red);
+      background: #291b1b;
+    }
+
+    .rule-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 1px 5px;
+      background: var(--accent-red);
+      color: #fff;
+      font-weight: bold;
+      margin-right: 4px;
+    }
+
+    /* 내부 인물 인터콤 메시지 카드 */
+    .comms-card {
+      background: #19211b;
+      border: 1px solid #3c4d3f;
+      border-left: 4px solid var(--accent-cyan);
+      padding: 9px 11px;
+      margin-bottom: 10px;
+    }
+
+    .comms-card.commander { border-left-color: var(--accent-amber); }
+    .comms-card.doctor { border-left-color: var(--accent-bio); }
+    .comms-card.quartermaster { border-left-color: #c58af9; }
+
+    .comms-sender {
+      font-weight: bold;
+      font-size: 0.82rem;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .comms-actions {
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .comms-choice-btn {
+      flex: 1;
+      padding: 5px 8px;
+      background: #243027;
+      border: 1px solid var(--accent-amber);
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .comms-choice-btn:hover {
+      background: #344739;
+    }
+
+    .city-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 0.8rem;
+    }
+
+    .city-table th, .city-table td {
+      border: 1px solid #38473b;
+      padding: 5px 7px;
+      text-align: left;
+    }
+
+    .city-table th {
+      background: #212b23;
+      color: var(--accent-amber);
+    }
+
+    .log-item {
+      padding: 5px 7px;
+      border-bottom: 1px solid #263028;
+      font-size: 0.78rem;
+    }
+
+    .log-item.pass { color: #8fd998; }
+    .log-item.fail { color: #f28585; }
+    .log-item.event { color: #f5d176; }
+
+    /* ---------------- 우측 패널 (검문 책상 & 도장 도구) ---------------- */
+    #right-panel {
+      display: flex;
+      flex-direction: column;
+      background: #1c1f1d;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #desk-toolbar {
+      height: 66px;
+      background: #141715;
+      border-bottom: 3px solid #090a09;
+      box-shadow: inset 0 -2px 0 #333b35;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 50;
+    }
+
+    .desk-hint {
+      font-size: 0.8rem;
+      color: #9ba89e;
+    }
+
+    .stamp-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .stamp-btn {
+      padding: 9px 20px;
+      font-family: inherit;
+      font-size: 0.96rem;
+      font-weight: 900;
+      letter-spacing: 1px;
+      border: 3px solid;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      box-shadow: 0 4px 0 #080a08;
+      transition: transform 0.08s, box-shadow 0.08s;
+    }
+
+    .stamp-btn:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #080a08;
+    }
+
+    .stamp-btn:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .stamp-btn.approve {
+      background: #194726;
+      border-color: #54bf71;
+      color: #a8f7bd;
+    }
+
+    .stamp-btn.approve:hover:not(:disabled) {
+      background: #215e32;
+    }
+
+    .stamp-btn.deny {
+      background: #571919;
+      border-color: #e05353;
+      color: #ffb3b3;
+    }
+
+    .stamp-btn.deny:hover:not(:disabled) {
+      background: #732020;
+    }
+
+    #desk-surface {
+      flex: 1;
+      position: relative;
+      background:
+        radial-gradient(circle at 50% 45%, #2c332e 0%, #1d211e 75%, #131714 100%);
+      overflow: hidden;
+    }
+
+    .desk-watermark {
+      position: absolute;
+      bottom: 14px;
+      right: 18px;
+      font-size: 0.82rem;
+      color: rgba(255, 255, 255, 0.07);
+      letter-spacing: 3px;
+      pointer-events: none;
+      font-weight: bold;
+    }
+
+    /* 돌발 변이 경보 배너 (책상 상단) */
+    #panic-timer-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #8f1818;
+      color: #fff;
+      padding: 8px 16px;
+      font-weight: bold;
+      font-size: 0.92rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 80;
+      border-bottom: 2px solid #ff8080;
+      animation: blink 0.6s infinite;
+    }
+
+    #panic-timer-bar.hidden {
+      display: none;
+    }
+
+    /* ==========================================================================
+       4. 서류 카드 스타일 (생존자 신분증, 검역 소견서, 특수 메모, 징계 경고장)
+       ========================================================================== */
+    .doc-card {
+      position: absolute;
+      color: var(--ink-dark);
+      box-shadow: 4px 8px 18px rgba(0, 0, 0, 0.7);
+      cursor: grab;
+    }
+
+    .doc-card:active {
+      cursor: grabbing;
+      box-shadow: 8px 14px 26px rgba(0, 0, 0, 0.85);
+    }
+
+    /* ---------------- 생존자 신분증 (SURVIVOR ID) ---------------- */
+    .id-doc {
+      width: 312px;
+      background: var(--paper-id);
+      border: 3px solid #635c4a;
+      border-radius: 3px;
+      padding: 12px;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(110,100,80,0.06) 0px, rgba(110,100,80,0.06) 1px, transparent 1px, transparent 6px);
+    }
+
+    .id-top-banner {
+      background: #2f3831;
+      color: #e3dec8;
+      text-align: center;
+      padding: 5px;
+      font-weight: bold;
+      font-size: 0.85rem;
+      letter-spacing: 1.5px;
+      margin-bottom: 10px;
+      border: 1px solid #7c8a7e;
+    }
+
+    .id-body {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 9px;
+    }
+
+    .id-photo-box {
+      width: 96px;
+      height: 108px;
+      border: 2px solid #4d483b;
+      background: #b8b3a4;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    #id-canvas {
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      filter: sepia(0.22) contrast(1.08);
+    }
+
+    .doc-fields {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-size: 0.8rem;
+    }
+
+    .field-row {
+      border-bottom: 1px dotted #87806e;
+      padding-bottom: 2px;
+    }
+
+    .field-label {
+      font-size: 0.65rem;
+      color: #5c5749;
+      font-weight: bold;
+      display: block;
+    }
+
+    .field-value {
+      font-weight: bold;
+      font-size: 0.83rem;
+      color: #141714;
+    }
+
+    .stamp-zone {
+      height: 70px;
+      border: 2px dashed #8c8470;
+      background: rgba(255, 255, 255, 0.3);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 6px;
+    }
+
+    .stamp-zone-hint {
+      font-size: 0.72rem;
+      color: #7a7362;
+      letter-spacing: 1px;
+    }
+
+    .ink-stamp {
+      position: absolute;
+      padding: 4px 12px;
+      border: 4px solid;
+      font-weight: 900;
+      font-size: 1.02rem;
+      letter-spacing: 1px;
+      text-align: center;
+      transform: rotate(-7deg) scale(1.4);
+      opacity: 0;
+      pointer-events: none;
+      animation: stampSlam 0.22s forwards cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .ink-stamp.approved {
+      color: var(--stamp-green);
+      border-color: var(--stamp-green);
+    }
+
+    .ink-stamp.denied {
+      color: var(--stamp-red);
+      border-color: var(--stamp-red);
+    }
+
+    .ink-stamp-sub {
+      display: block;
+      font-size: 0.6rem;
+      margin-top: 2px;
+    }
+
+    .id-mrz {
+      margin-top: 7px;
+      padding-top: 4px;
+      border-top: 1px solid #87806e;
+      font-size: 0.68rem;
+      letter-spacing: 1px;
+      color: #423f35;
+      text-align: center;
+    }
+
+    /* ---------------- 검역 소견서 (MEDICAL CLEARANCE) ---------------- */
+    .med-doc {
+      width: 284px;
+      background: var(--paper-med);
+      border: 3px solid #41695c;
+      padding: 12px;
+    }
+
+    .med-header {
+      border-bottom: 2px solid #2e4d43;
+      padding-bottom: 5px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .med-title {
+      font-weight: 900;
+      font-size: 0.9rem;
+      color: #17332a;
+    }
+
+    .med-cross {
+      width: 24px;
+      height: 24px;
+      background: #2e4d43;
+      color: #cce3db;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+    }
+
+    /* ---------------- 내부 연락 메모지 (SPECIAL NOTE) ---------------- */
+    .note-doc {
+      width: 255px;
+      background: var(--paper-note);
+      border: 2px solid #9c8938;
+      padding: 11px;
+      font-size: 0.8rem;
+      color: #2b240b;
+      transform: rotate(2deg);
+    }
+
+    /* ---------------- 징계 경고장 (CITATION SLIP) ---------------- */
+    .citation-doc {
+      width: 305px;
+      background: var(--paper-citation);
+      border: 2px dashed #a32929;
+      padding: 11px;
+      font-size: 0.8rem;
+      color: #3d1010;
+      animation: slidePrint 0.32s ease-out;
+    }
+
+    .citation-header {
+      font-weight: 900;
+      color: #ab1818;
+      border-bottom: 2px solid #ab1818;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ==========================================================================
+       5. 모달 화면 (시작 화면, 일일 정산, 게임 오버)
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 9, 7, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+      padding: 20px;
+    }
+
+    .modal-backdrop.hidden {
+      display: none;
+    }
+
+    .modal-box {
+      width: 100%;
+      max-width: 550px;
+      background: #141a15;
+      border: 4px solid var(--border-light);
+      box-shadow: 0 0 45px rgba(0, 0, 0, 0.95);
+      padding: 24px;
+      text-align: center;
+    }
+
+    .modal-emblem {
+      font-size: 2.2rem;
+      color: var(--accent-amber);
+      margin-bottom: 6px;
+    }
+
+    .modal-title {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: var(--accent-amber);
+      letter-spacing: 1.5px;
+      margin-bottom: 10px;
+    }
+
+    .modal-desc {
+      font-size: 0.88rem;
+      line-height: 1.58;
+      color: var(--text-main);
+      margin-bottom: 18px;
+      text-align: left;
+      background: #0d120e;
+      padding: 14px;
+      border: 1px solid #324235;
+    }
+
+    .settlement-table {
+      width: 100%;
+      margin: 12px 0 18px;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    .settlement-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #2b382e;
+    }
+
+    .settlement-table td:first-child {
+      text-align: left;
+      color: var(--text-dim);
+    }
+
+    .settlement-table td:last-child {
+      text-align: right;
+      font-weight: bold;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 13px;
+      background: #234729;
+      border: 2px solid var(--accent-bio);
+      color: #d9ffdf;
+      font-family: inherit;
+      font-size: 1.02rem;
+      font-weight: bold;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+    }
+
+    .btn-primary:hover {
+      background: #2f5e37;
+    }
+
+    @keyframes stampSlam {
+      0% { transform: rotate(-7deg) scale(1.7); opacity: 0.2; }
+      100% { transform: rotate(-7deg) scale(1); opacity: 0.92; }
+    }
+
+    @keyframes slidePrint {
+      0% { transform: translateY(40px); opacity: 0; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    @keyframes alarmPulse {
+      0%, 100% { opacity: 0.95; }
+      50% { opacity: 0.45; }
+    }
+
+    @media (max-width: 920px) {
+      #workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: 48% 52%;
+      }
+      #left-panel {
+        border-right: none;
+        border-bottom: 4px solid var(--border-dark);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="crt-overlay"></div>
+
+  <!-- ========================================================================
+       상단 상태 바
+       ======================================================================== -->
+  <header id="top-bar">
+    <div class="brand-title">
+      <span class="hazard-tag">BIO-HAZARD LV.5</span>
+      <span>제9격리구역: 최후의 방벽</span>
+      <span id="date-display" style="font-size:0.82rem; color:#849687;">2034. 09. 14</span>
+    </div>
+
+    <div class="status-group">
+      <div class="stat-box">
+        <span class="stat-label">생존일</span>
+        <span class="stat-val" id="day-display">DAY 1</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">교대 시간</span>
+        <span class="stat-val timer" id="timer-display">01:30</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">배급권</span>
+        <span class="stat-val credits" id="credits-display">25 CR</span>
+      </div>
+      <div class="stat-box" title="징계 경고 3회 누적 시 격리구역 밖으로 추방됩니다">
+        <span class="stat-label">경고</span>
+        <div class="warning-pips" id="warning-pips">
+          <div class="pip"></div>
+          <div class="pip"></div>
+          <div class="pip"></div>
+        </div>
+      </div>
+      <button class="btn-small" id="sound-toggle-btn">🔊 SFX ON</button>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       메인 작업 공간
+       ======================================================================== -->
+  <main id="workspace">
+    <!-- 좌측 패널 -->
+    <section id="left-panel">
+      <!-- 격리 검문 창구 -->
+      <div id="booth-section">
+        <div class="booth-header">
+          <span>[제9격리구역 에어록 #02]</span>
+          <span id="queue-status">대기열 감시 중</span>
+        </div>
+
+        <div class="booth-window-wrap">
+          <div class="portrait-column">
+            <div class="portrait-frame">
+              <canvas id="booth-canvas" width="64" height="64"></canvas>
+              <div class="booth-bars"></div>
+              <div id="booth-shutter" class="closed">에어록 폐쇄</div>
+            </div>
+            <button class="scan-btn" id="btn-scan" disabled>🔬 생체 스캔 실행</button>
+          </div>
+
+          <div class="dialogue-box">
+            <div>
+              <div class="dialogue-speaker">
+                <span id="speaker-label">대기 생존자</span>
+                <span id="special-tag" style="color:var(--accent-red); display:none;">[특수 상황]</span>
+              </div>
+              <div id="dialogue-text">에어록 개방을 대기하는 중...</div>
+            </div>
+
+            <div id="scan-result-box"></div>
+            <div id="feedback-banner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 규칙 수첩 / 내부 통신 / 구역 일람 / 기록 탭 -->
+      <div id="rulebook-section">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="tab-rules">📋 방역 수칙</button>
+          <button class="tab-btn" data-tab="tab-comms" id="comms-tab-btn">📻 내부 통신</button>
+          <button class="tab-btn" data-tab="tab-zones">🗺️ 구역 일람</button>
+          <button class="tab-btn" data-tab="tab-log">🗂️ 기록</button>
+        </div>
+
+        <!-- 탭 1: 방역 수칙 -->
+        <div id="tab-rules" class="tab-content active"></div>
+
+        <!-- 탭 2: 보호소 내부 인물 인터콤 -->
+        <div id="tab-comms" class="tab-content">
+          <p style="color:var(--text-dim); margin-bottom:8px; font-size:0.78rem;">
+            보호소 지휘부·의무실·보급부에서 수신된 무전 및 개인 요청 내역입니다.
+          </p>
+          <div id="comms-list"></div>
+        </div>
+
+        <!-- 탭 3: 생존 구역 및 거점 코드 -->
+        <div id="tab-zones" class="tab-content">
+          <p style="color:var(--text-dim); margin-bottom:8px; font-size:0.78rem;">
+            신분증의 <strong>출신 거점(ORIGIN)</strong>은 등록된 공식 생존 구역과 일치해야 합니다.
+          </p>
+          <table class="city-table" id="zone-table-body"></table>
+        </div>
+
+        <!-- 탭 4: 당일 검문 기록 -->
+        <div id="tab-log" class="tab-content">
+          <p style="color:var(--text-dim); margin-bottom:8px; font-size:0.78rem;">
+            오늘 처리한 생존자 검문 결과입니다.
+          </p>
+          <div id="log-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 우측 패널 (검문 책상) -->
+    <section id="right-panel">
+      <div id="desk-toolbar">
+        <div class="desk-hint">
+          💡 서류 대조와 <strong>[생체 스캔]</strong>으로 감염 여부를 판별한 뒤 도장을 찍으세요.
+        </div>
+        <div class="stamp-controls">
+          <button class="btn-small" id="arrange-btn" title="서류 위치 초기화">서류 정렬</button>
+          <button class="stamp-btn approve" id="btn-approve" disabled>✔ 격리 통과 (PASS)</button>
+          <button class="stamp-btn deny" id="btn-deny" disabled>✖ 진입 거부 (DENY)</button>
+        </div>
+      </div>
+
+      <div id="desk-surface">
+        <!-- 돌발 변이 경보 바 -->
+        <div id="panic-timer-bar" class="hidden">
+          <span>⚠️ 경고: 대상자 급성 변이 징후 포착! 즉시 [진입 거부]를 눌러 에어록을 폐쇄하십시오!</span>
+          <span id="panic-countdown">08.0s</span>
+        </div>
+        <div class="desk-watermark">SECTOR 09 QUARANTINE // BIO-CONTAINMENT UNIT</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       모달 1: 게임 시작 브리핑
+       ======================================================================== -->
+  <div id="start-screen" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-emblem">☣️</div>
+      <div class="modal-title">제9격리구역: 최후의 방벽</div>
+      <p style="color:var(--text-dim); font-size:0.84rem; margin-bottom:12px;">
+        치사율 100% 변이 바이러스 창궐 D+142 // 에어록 검문관 임명서
+      </p>
+      <div class="modal-desc">
+        <strong>[검문관 행동 강령]</strong><br><br>
+        1. 변이 바이러스 감염자는 <strong>고열(37.6°C 이상), 충혈된 눈, 녹색빛 피부 반점, 목의 교상 흉터</strong>를 보입니다. 창구 모습과 <strong>[🔬 생체 스캔]</strong> 결과를 반드시 확인하십시오.<br>
+        2. <strong>[방역 수칙]</strong>에 어긋난 위조 신분증, 만료된 검역 소견서, 오염 구역 출신자는 즉시 <strong>[진입 거부]</strong> 처리하십시오.<br>
+        3. 근무 중 <strong>사령관·의무관·보급관</strong>이 인터콤으로 특수 지시나 개인적인 부탁을 전해올 수 있습니다. 상황에 맞게 판단하십시오.<br>
+        4. 감염자를 들여보내거나 오심을 반복해 <strong>경고 3회</strong>가 누적되면 즉시 추방됩니다.
+      </div>
+      <button class="btn-primary" id="start-game-btn">에어록 셔터 개방 (근무 시작)</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       모달 2: 일일 정산 화면
+       ======================================================================== -->
+  <div id="eod-modal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-emblem">📋</div>
+      <div class="modal-title" id="eod-title">1일차 격리 근무 정산</div>
+      <table class="settlement-table" id="eod-table"></table>
+      <button class="btn-primary" id="next-day-btn">다음 일차 교대 근무 시작</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       모달 3: 게임 오버 화면
+       ======================================================================== -->
+  <div id="gameover-modal" class="modal-backdrop hidden">
+    <div class="modal-box" style="border-color: var(--accent-red);">
+      <div class="modal-emblem" style="color: var(--accent-red);">☣️</div>
+      <div class="modal-title" style="color: var(--accent-red);" id="gameover-title">격리구역 추방 통지</div>
+      <div class="modal-desc" id="gameover-reason"></div>
+      <button class="btn-primary" onclick="location.reload()">처음부터 다시 시작</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       게임 핵심 로직 (JavaScript)
+       ======================================================================== -->
+  <script>
+    /* ========================================================================
+       1. Web Audio API 사운드 합성 엔진
+       ======================================================================== */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioCtx();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      toggle() {
+        this.enabled = !this.enabled;
+        return this.enabled;
+      }
+
+      // 묵직한 유압 도장 타격음
+      playStamp() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(140, now);
+        osc.frequency.exponentialRampToValueAtTime(34, now + 0.15);
+
+        gain.gain.setValueAtTime(0.68, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.17);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.18);
+
+        this.playNoiseBurst(0.08, 850, 0.25);
+      }
+
+      // 서류 집기 사각거림
+      playPaper() {
+        if (!this.enabled) return;
+        this.init();
+        this.playNoiseBurst(0.1, 2100, 0.13);
+      }
+
+      // 생체 스캐너 펄스 스윕음
+      playScan() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(1180, now + 0.28);
+
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.005, now + 0.3);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.31);
+      }
+
+      // 내부 무전기(인터콤) 수신 신호음
+      playRadio() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        this.playNoiseBurst(0.14, 1500, 0.16);
+        [660, 880].forEach((freq, i) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(freq, now + i * 0.07);
+          gain.gain.setValueAtTime(0.08, now + i * 0.07);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.09);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + i * 0.07);
+          osc.stop(now + i * 0.07 + 0.1);
+        });
+      }
+
+      // 바이오하자드 비상 사이렌 경보음
+      playAlarm() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(420, now);
+        osc.frequency.linearRampToValueAtTime(760, now + 0.22);
+        osc.frequency.linearRampToValueAtTime(420, now + 0.44);
+
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.005, now + 0.46);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.47);
+      }
+
+      // 대사 출력 비프음
+      playVoiceBeep(isFemale = false, isInfected = false) {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = isInfected ? 'sawtooth' : 'square';
+        const baseFreq = isInfected ? 115 : (isFemale ? 265 : 165);
+        osc.frequency.setValueAtTime(baseFreq + (Math.random() * 30 - 15), now);
+
+        gain.gain.setValueAtTime(0.032, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+
+      // 경고장 프린터 출력음
+      playCitation() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        for (let i = 0; i < 6; i++) {
+          const t = now + i * 0.06;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(i % 2 === 0 ? 540 : 380, t);
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.005, t + 0.05);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.055);
+        }
+      }
+
+      // 에어록 강철 셔터 개폐음
+      playShutter() {
+        if (!this.enabled) return;
+        this.init();
+        this.playNoiseBurst(0.3, 380, 0.24);
+      }
+
+      // 판정 성공 신호음
+      playSuccess() {
+        if (!this.enabled) return;
+        this.init();
+        const now = this.ctx.currentTime;
+        [440, 659].forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.12, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.18);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.2);
+        });
+      }
+
+      playNoiseBurst(duration, filterFreq, volume) {
+        const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = filterFreq;
+
+        const gain = this.ctx.createGain();
+        const now = this.ctx.currentTime;
+        gain.gain.setValueAtTime(volume, now);
+        gain.gain.exponentialRampToValueAtTime(0.005, now + duration);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+    }
+
+    const sfx = new SoundEngine();
+
+    /* ========================================================================
+       2. 아포칼립스 세계관 데이터
+       ======================================================================== */
+    const WORLD_DATA = {
+      sectors: [
+        { code: 'SEC-01', name: '중앙 방주 시타델', outposts: ['알파 돔', '화이트 타워', '제1발전소'] },
+        { code: 'SEC-04', name: '북부 산악 벙커', outposts: ['아이언 리지', '프로스트 게이트', '그레이 쉘터'] },
+        { code: 'SEC-07', name: '동부 항만 격리구', outposts: ['하버 나인', '솔트 크릭', '등대 기지'] },
+        { code: 'SEC-11', name: '남부 지하 방공호', outposts: ['메트로 4호선', '딥 코어', '사일로 B'] }
+      ],
+      fakeOutposts: ['레드 존 99', '폐허의 거리', '블랙 포레스트', '데드 랜드', '아우터 슬럼'],
+      maleFirstNames: ['강민호', '서진우', '윤태현', '박도훈', '최성민', '이준혁', '정현우', '한승재', '조영진', '오세훈'],
+      femaleFirstNames: ['김서연', '이지은', '박수진', '최유나', '정하은', '강지민', '윤채원', '장소희', '임다은', '한예진'],
+      greetings: [
+        '제발 문을 열어주시오. 밖에는 괴물들뿐입니다.',
+        '검역 절차는 모두 마쳤습니다. 신분증 여기 있습니다.',
+        '겨우 도망쳐 왔습니다... 제발 안에 들어가게 해주세요.',
+        '서류 확인해 주십시오. 저는 감염되지 않았습니다.',
+        '빨리 통과시켜 주시오! 뒤에서 무리가 쫓아오고 있소!'
+      ],
+      infectedExcuses: [
+        '콜록... 이건 그냥 찬바람을 쐬어서 감기에 걸린 것뿐이오!',
+        '눈이 붉은 건 사흘 동안 한숨도 못 자서 그렇습니다! 물리지 않았소!',
+        '열이 좀 나긴 하지만 바이러스는 아닙니다! 제발 들여보내 주세요!'
+      ],
+      missingMedExcuses: [
+        '검역소 의무관이 괴물에게 습격당하는 바람에 소견서를 못 받았습니다!',
+        '급히 대피하느라 검역 소견서를 떨어뜨렸습니다. 스캔해 보시면 압니다!'
+      ]
+    };
+
+    /* ========================================================================
+       3. 픽셀 아트 생존자 & 감염 징후 렌더러 (64x64 캔버스)
+       ======================================================================== */
+    class PortraitRenderer {
+      static generateAppearance(gender) {
+        const skins = ['#e3bfa1', '#cfa382', '#bd8b68', '#edd3bc'];
+        const hairs = ['#1c1917', '#38271c', '#57483a', '#70706e', '#7d4427'];
+        const coats = ['#2b362e', '#38332c', '#29333d', '#3d3829', '#302b36'];
+
+        const maleHairs = ['bald', 'short', 'parted', 'spiky'];
+        const femaleHairs = ['long', 'bun', 'parted', 'short'];
+
+        const hairPool = gender === 'M' ? maleHairs : femaleHairs;
+        const beardPool = gender === 'M' ? ['none', 'none', 'mustache', 'full'] : ['none'];
+
+        return {
+          gender,
+          skin: skins[Math.floor(Math.random() * skins.length)],
+          hairColor: hairs[Math.floor(Math.random() * hairs.length)],
+          coatColor: coats[Math.floor(Math.random() * coats.length)],
+          faceShape: ['normal', 'wide', 'narrow'][Math.floor(Math.random() * 3)],
+          hairStyle: hairPool[Math.floor(Math.random() * hairPool.length)],
+          hasGlasses: Math.random() < 0.32,
+          beardStyle: beardPool[Math.floor(Math.random() * beardPool.length)],
+          // 바이러스 감염 시각 징후 (기본은 정상)
+          infectedSkin: false,
+          bloodshotEyes: false,
+          sweating: false,
+          biteMark: false
+        };
+      }
+
+      // 신분증 사진 위조용
+      static createMismatchedAppearance(orig) {
+        const fake = {
+          ...orig,
+          infectedSkin: false,
+          bloodshotEyes: false,
+          sweating: false,
+          biteMark: false
+        };
+        fake.hasGlasses = !orig.hasGlasses;
+        const allHairs = ['bald', 'short', 'long', 'bun', 'spiky'];
+        const otherHairs = allHairs.filter(h => h !== orig.hairStyle);
+        fake.hairStyle = otherHairs[Math.floor(Math.random() * otherHairs.length)];
+        if (orig.gender === 'M') {
+          fake.beardStyle = orig.beardStyle === 'full' ? 'none' : 'full';
+        }
+        return fake;
+      }
+
+      static draw(canvas, app, isBlinking = false, isPhoto = false, showScanOverlay = false) {
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        // 배경
+        ctx.fillStyle = isPhoto ? '#bab4a2' : '#1e2620';
+        ctx.fillRect(0, 0, 64, 64);
+
+        // 상의 / 방한복
+        ctx.fillStyle = app.coatColor;
+        ctx.fillRect(12, 48, 40, 16);
+        ctx.fillRect(16, 45, 32, 4);
+
+        // 피부색 (감염 시 창백한 녹회색 톤)
+        const currentSkin = (!isPhoto && app.infectedSkin) ? '#9eb096' : app.skin;
+
+        // 목
+        ctx.fillStyle = currentSkin;
+        ctx.fillRect(26, 39, 12, 8);
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(26, 39, 12, 3);
+
+        // 목의 변이 혈관 / 교상 흉터 (실제 창구에서만 보임)
+        if (!isPhoto && app.biteMark) {
+          ctx.fillStyle = '#7a1c24';
+          ctx.fillRect(33, 41, 4, 3);
+          ctx.fillStyle = '#4a2640';
+          ctx.fillRect(32, 40, 2, 5);
+        }
+
+        // 뒷머리
+        if (app.hairStyle === 'long') {
+          ctx.fillStyle = app.hairColor;
+          ctx.fillRect(16, 14, 32, 34);
+        } else if (app.hairStyle === 'bun') {
+          ctx.fillStyle = app.hairColor;
+          ctx.fillRect(25, 4, 14, 7);
+        }
+
+        // 얼굴형
+        let fx = 20, fw = 24;
+        if (app.faceShape === 'wide') { fx = 18; fw = 28; }
+        if (app.faceShape === 'narrow') { fx = 22; fw = 20; }
+
+        ctx.fillStyle = currentSkin;
+        ctx.fillRect(fx, 14, fw, 26);
+        ctx.fillRect(fx + 2, 40, fw - 4, 3);
+
+        // 귀
+        ctx.fillRect(fx - 2, 24, 2, 6);
+        ctx.fillRect(fx + fw, 24, 2, 6);
+
+        // 그림자
+        ctx.fillStyle = 'rgba(0,0,0,0.14)';
+        ctx.fillRect(fx + fw - 4, 15, 4, 25);
+
+        // 눈썹 & 눈
+        ctx.fillStyle = '#181614';
+        ctx.fillRect(24, 21, 5, 1);
+        ctx.fillRect(35, 21, 5, 1);
+
+        if (isBlinking && !isPhoto) {
+          ctx.fillRect(25, 24, 4, 1);
+          ctx.fillRect(35, 24, 4, 1);
+        } else {
+          // 감염 징후 시 충혈된 붉은 흰자위
+          ctx.fillStyle = (!isPhoto && app.bloodshotEyes) ? '#e85858' : '#ffffff';
+          ctx.fillRect(25, 23, 4, 2);
+          ctx.fillRect(35, 23, 4, 2);
+
+          ctx.fillStyle = (!isPhoto && app.bloodshotEyes) ? '#4a0808' : '#141210';
+          ctx.fillRect(26, 23, 2, 2);
+          ctx.fillRect(36, 23, 2, 2);
+
+          if (app.gender === 'F') {
+            ctx.fillRect(24, 23, 1, 1);
+            ctx.fillRect(39, 23, 1, 1);
+          }
+        }
+
+        // 고열 식은땀 표현
+        if (!isPhoto && app.sweating) {
+          ctx.fillStyle = '#7ad7f0';
+          ctx.fillRect(fx + 2, 17, 2, 4);
+          ctx.fillRect(fx + fw - 4, 19, 2, 3);
+        }
+
+        // 안경
+        if (app.hasGlasses) {
+          ctx.fillStyle = '#111111';
+          ctx.fillRect(23, 22, 8, 1);
+          ctx.fillRect(23, 26, 8, 1);
+          ctx.fillRect(23, 22, 1, 5);
+          ctx.fillRect(30, 22, 1, 5);
+
+          ctx.fillRect(33, 22, 8, 1);
+          ctx.fillRect(33, 26, 8, 1);
+          ctx.fillRect(33, 22, 1, 5);
+          ctx.fillRect(40, 22, 1, 5);
+          ctx.fillRect(31, 23, 2, 1);
+        }
+
+        // 코
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.fillRect(31, 25, 2, 6);
+        ctx.fillRect(30, 30, 4, 1);
+
+        // 수염
+        ctx.fillStyle = app.hairColor;
+        if (app.beardStyle === 'mustache') {
+          ctx.fillRect(27, 33, 10, 2);
+        } else if (app.beardStyle === 'full') {
+          ctx.fillRect(fx, 31, 3, 10);
+          ctx.fillRect(fx + fw - 3, 31, 3, 10);
+          ctx.fillRect(fx + 2, 37, fw - 4, 6);
+          ctx.fillRect(27, 33, 10, 2);
+        }
+
+        // 입
+        ctx.fillStyle = (!isPhoto && app.infectedSkin) ? '#4a2b36' : (app.gender === 'F' ? '#8f3d3d' : '#4a2c24');
+        ctx.fillRect(28, 35, 8, 1);
+
+        // 앞머리
+        ctx.fillStyle = app.hairColor;
+        if (app.hairStyle === 'short') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx - 1, 13, 2, 7);
+          ctx.fillRect(fx + fw - 1, 13, 2, 7);
+        } else if (app.hairStyle === 'parted') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx, 15, 8, 3);
+          ctx.fillRect(fx - 1, 13, 2, 8);
+          ctx.fillRect(fx + fw - 1, 13, 2, 8);
+        } else if (app.hairStyle === 'long') {
+          ctx.fillRect(fx - 2, 10, fw + 4, 6);
+          ctx.fillRect(fx - 3, 14, 4, 30);
+          ctx.fillRect(fx + fw - 1, 14, 4, 30);
+        } else if (app.hairStyle === 'bun') {
+          ctx.fillRect(fx, 10, fw, 6);
+          ctx.fillRect(fx - 1, 13, 2, 8);
+          ctx.fillRect(fx + fw - 1, 13, 2, 8);
+        } else if (app.hairStyle === 'spiky') {
+          ctx.fillRect(fx, 11, fw, 5);
+          for (let sx = fx + 1; sx < fx + fw - 2; sx += 4) {
+            ctx.fillRect(sx, 7, 3, 5);
+          }
+        }
+
+        // 생체 스캔 완료 시 홀로그램 그리드 오버레이
+        if (!isPhoto && showScanOverlay) {
+          ctx.strokeStyle = app.infectedSkin || app.bloodshotEyes ? 'rgba(255, 70, 70, 0.45)' : 'rgba(87, 194, 214, 0.4)';
+          ctx.lineWidth = 1;
+          for (let y = 4; y < 64; y += 8) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(64, y);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    /* ========================================================================
+       4. 날짜 유틸리티
+       ======================================================================== */
+    function formatDate(d) {
+      const mm = String(d.month).padStart(2, '0');
+      const dd = String(d.day).padStart(2, '0');
+      return `${d.year}.${mm}.${dd}`;
+    }
+
+    function addDays(baseDate, offsetDays) {
+      const dt = new Date(baseDate.year, baseDate.month - 1, baseDate.day + offsetDays);
+      return {
+        year: dt.getFullYear(),
+        month: dt.getMonth() + 1,
+        day: dt.getDate()
+      };
+    }
+
+    /* ========================================================================
+       5. 생존자 및 특수 이벤트 생성기
+       ======================================================================== */
+    class SurvivorGenerator {
+      static generateNormal(day, currentDate, dailyDirectives) {
+        const gender = Math.random() < 0.5 ? 'M' : 'F';
+        const namePool = gender === 'M' ? WORLD_DATA.maleFirstNames : WORLD_DATA.femaleFirstNames;
+        const fullName = namePool[Math.floor(Math.random() * namePool.length)];
+
+        const dob = {
+          year: 1985 + Math.floor(Math.random() * 28),
+          month: 1 + Math.floor(Math.random() * 12),
+          day: 1 + Math.floor(Math.random() * 28)
+        };
+
+        // 정상 구역/거점 선택
+        let validSectors = WORLD_DATA.sectors;
+        if (day >= 3 && dailyDirectives.bannedSector) {
+          validSectors = validSectors.filter(s => s.name !== dailyDirectives.bannedSector);
+        }
+        const sector = validSectors[Math.floor(Math.random() * validSectors.length)];
+        const outpost = sector.outposts[Math.floor(Math.random() * sector.outposts.length)];
+
+        const idCode = `${sector.code}-${1000 + Math.floor(Math.random() * 8999)}`;
+        const validExp = addDays(currentDate, 10 + Math.floor(Math.random() * 120));
+
+        const liveAppearance = PortraitRenderer.generateAppearance(gender);
+        let photoAppearance = { ...liveAppearance };
+
+        // 정상 생체 수치
+        const vitals = {
+          temp: +(36.3 + Math.random() * 0.9).toFixed(1), // 36.3 ~ 37.2°C
+          bpm: 68 + Math.floor(Math.random() * 24),       // 68 ~ 91 BPM
+          antigen: 'NEGATIVE (음성)'
+        };
+
+        const idCard = {
+          name: fullName,
+          dob: formatDate(dob),
+          gender,
+          sector: sector.name,
+          outpost,
+          id: idCode,
+          exp: validExp
+        };
+
+        let medReport = null;
+        if (day >= 2) {
+          medReport = {
+            name: fullName,
+            id: idCode,
+            temp: vitals.temp,
+            result: 'CLEAR (정상)',
+            exp: addDays(currentDate, 2 + Math.floor(Math.random() * 14))
+          };
+        }
+
+        let dialogue = WORLD_DATA.greetings[Math.floor(Math.random() * WORLD_DATA.greetings.length)];
+
+        // 약 50% 확률로 결격 사유(바이러스 감염 징후 또는 서류 모순) 삽입
+        const hasDefect = Math.random() < 0.52;
+        let defectReason = null;
+
+        if (hasDefect) {
+          const defectPool = [
+            'VIRUS_SYMPTOMS',
+            'VIRUS_SYMPTOMS',
+            'EXPIRED_ID',
+            'PHOTO_MISMATCH',
+            'INVALID_OUTPOST'
+          ];
+
+          if (day >= 2) {
+            defectPool.push('MISSING_MED_REPORT', 'MED_ID_MISMATCH', 'MED_TAMPERED');
+          }
+          if (day >= 3 && dailyDirectives.bannedSector) {
+            defectPool.push('BANNED_SECTOR', 'BANNED_SECTOR');
+          }
+
+          const chosen = defectPool[Math.floor(Math.random() * defectPool.length)];
+
+          switch (chosen) {
+            case 'VIRUS_SYMPTOMS': {
+              // 실제 바이러스 감염자: 고열 + 외형 징후 + 양성 반응
+              vitals.temp = +(38.1 + Math.random() * 1.8).toFixed(1);
+              vitals.bpm = 128 + Math.floor(Math.random() * 35);
+              vitals.antigen = 'POSITIVE (바이러스 양성!)';
+
+              liveAppearance.bloodshotEyes = true;
+              liveAppearance.sweating = true;
+              if (Math.random() < 0.65) liveAppearance.infectedSkin = true;
+              if (Math.random() < 0.55) liveAppearance.biteMark = true;
+
+              // 검역 소견서를 위조해 들고 온 경우
+              if (medReport) {
+                medReport.temp = 36.6;
+                medReport.result = 'CLEAR (위조됨)';
+              }
+
+              dialogue = WORLD_DATA.infectedExcuses[Math.floor(Math.random() * WORLD_DATA.infectedExcuses.length)];
+              defectReason = `변이 바이러스 감염 징후 (체온 ${vitals.temp}°C / 양성 반응)`;
+              break;
+            }
+            case 'EXPIRED_ID': {
+              const expDate = addDays(currentDate, -(4 + Math.floor(Math.random() * 90)));
+              idCard.exp = expDate;
+              defectReason = `생존자 신분증 유효기간 만료 (${formatDate(expDate)})`;
+              break;
+            }
+            case 'PHOTO_MISMATCH': {
+              photoAppearance = PortraitRenderer.createMismatchedAppearance(liveAppearance);
+              defectReason = '신분증 사진과 실제 대상자 외모 불일치';
+              break;
+            }
+            case 'INVALID_OUTPOST': {
+              const fakeOutpost = WORLD_DATA.fakeOutposts[Math.floor(Math.random() * WORLD_DATA.fakeOutposts.length)];
+              idCard.outpost = fakeOutpost;
+              defectReason = `미등록 오염 구역 출신 (${fakeOutpost})`;
+              break;
+            }
+            case 'MISSING_MED_REPORT': {
+              medReport = null;
+              dialogue = WORLD_DATA.missingMedExcuses[Math.floor(Math.random() * WORLD_DATA.missingMedExcuses.length)];
+              defectReason = '필수 서류(검역 소견서) 미제출';
+              break;
+            }
+            case 'MED_ID_MISMATCH': {
+              medReport.id = `${sector.code}-${1000 + Math.floor(Math.random() * 8999)}X`;
+              defectReason = `신분증 번호(${idCard.id})와 검역 소견서 번호(${medReport.id}) 불일치`;
+              break;
+            }
+            case 'MED_TAMPERED': {
+              const expMed = addDays(currentDate, -(2 + Math.floor(Math.random() * 20)));
+              medReport.exp = expMed;
+              defectReason = `검역 소견서 유효기한 만료 (${formatDate(expMed)})`;
+              break;
+            }
+            case 'BANNED_SECTOR': {
+              const bannedObj = WORLD_DATA.sectors.find(s => s.name === dailyDirectives.bannedSector);
+              idCard.sector = bannedObj.name;
+              idCard.outpost = bannedObj.outposts[0];
+              idCard.id = `${bannedObj.code}-${1000 + Math.floor(Math.random() * 8999)}`;
+              if (medReport) medReport.id = idCard.id;
+              defectReason = `금일 봉쇄 지정 구역 출신 (${bannedObj.name})`;
+              break;
+            }
+          }
+        }
+
+        return {
+          type: 'NORMAL',
+          isValid: !hasDefect,
+          defectReason,
+          liveAppearance,
+          photoAppearance,
+          idCard,
+          medReport,
+          vitals,
+          dialogue
+        };
+      }
+
+      // 특수 이벤트 입국자 생성
+      static generateSpecialEvent(eventId, currentDate) {
+        if (eventId === 'BRIBE_INFECTED') {
+          const app = PortraitRenderer.generateAppearance('M');
+          app.bloodshotEyes = true;
+          app.sweating = true;
+          app.biteMark = true;
+
+          return {
+            type: 'SPECIAL',
+            eventId: 'BRIBE_INFECTED',
+            eventTitle: '긴급 회유: 감염자의 뇌물 제안',
+            isValid: false,
+            defectReason: '바이러스 감염자 뇌물 수뢰 및 무단 통과',
+            liveAppearance: app,
+            photoAppearance: { ...app, bloodshotEyes: false, sweating: false, biteMark: false },
+            idCard: {
+              name: '조태식',
+              dob: '1991.04.12',
+              gender: 'M',
+              sector: '동부 항만 격리구',
+              outpost: '하버 나인',
+              id: 'SEC-07-4812',
+              exp: addDays(currentDate, 45)
+            },
+            medReport: null,
+            vitals: { temp: 38.9, bpm: 142, antigen: 'POSITIVE (바이러스 양성!)' },
+            dialogue: '쉿, 조용히 하시오... 내가 비상 배급권 30 CR을 쥐여주겠소. 눈 딱 감고 한 번만 들여보내 주시오!',
+            noteText: '※ [개인 거래 제안]\n대상자가 창구 틈으로 배급권 30 CR을 내밀고 있습니다.\n• 통과 시: +30 CR 획득 / 경고 +1회 및 방역 위반\n• 거부 시: 정상 방역 처리 (+10 CR)'
+          };
+        }
+
+        if (eventId === 'VACCINE_RESEARCHER') {
+          const app = PortraitRenderer.generateAppearance('F');
+          app.hasGlasses = true;
+          app.hairStyle = 'bun';
+
+          return {
+            type: 'SPECIAL',
+            eventId: 'VACCINE_RESEARCHER',
+            eventTitle: '의무실 긴급 무전: 항체 샘플 운반자',
+            isValid: true, // 한소연 수석 의무관의 특별 권한으로 통과가 정답!
+            defectReason: '수석 의무관이 요청한 백신 연구원 입국 거부',
+            liveAppearance: app,
+            photoAppearance: { ...app },
+            idCard: {
+              name: '윤서아 박사',
+              dob: '1994.08.23',
+              gender: 'F',
+              sector: '중앙 방주 시타델',
+              outpost: '화이트 타워',
+              id: 'SEC-01-9004',
+              exp: addDays(currentDate, -12) // 의도적으로 만료된 신분증
+            },
+            medReport: {
+              name: '윤서아 박사',
+              id: 'SEC-01-9004',
+              temp: 36.5,
+              result: 'CLEAR (정상)',
+              exp: addDays(currentDate, 5)
+            },
+            vitals: { temp: 36.5, bpm: 78, antigen: 'NEGATIVE (음성)' },
+            dialogue: '한소연 의무관님께 무전 받으셨죠? 연구소가 함락돼서 신분증 갱신을 못 했습니다. 이 혈청 샘플이 꼭 필요합니다!',
+            commsMessage: {
+              sender: '한소연 수석 의무관 (의무실)',
+              roleClass: 'doctor',
+              text: '검문관님! 방금 도착한 윤서아 박사는 변이 억제 항체 샘플을 가지고 있습니다. 신분증 유효기간이 지났지만 감염 징후가 전혀 없으니 제 책임하에 [격리 통과]시켜 주세요! (+20 CR 특별 포상)'
+            }
+          };
+        }
+
+        if (eventId === 'QUARTERMASTER_BROTHER') {
+          const app = PortraitRenderer.generateAppearance('M');
+          app.hairStyle = 'spiky';
+
+          return {
+            type: 'SPECIAL',
+            eventId: 'QUARTERMASTER_BROTHER',
+            eventTitle: '보급부 사적 청탁: 박진수 보급관의 동생',
+            isValid: false, // 원칙상 미등록 거점 출신이라 불합격이지만, 눈감아주면 뒷돈 획득
+            defectReason: '미등록 거점 출신자 무단 통과 (보급관 청탁)',
+            liveAppearance: app,
+            photoAppearance: { ...app },
+            idCard: {
+              name: '박진혁',
+              dob: '2003.11.05',
+              gender: 'M',
+              sector: '북부 산악 벙커',
+              outpost: '블랙 포레스트', // 미등록 거점
+              id: 'SEC-04-3319',
+              exp: addDays(currentDate, 30)
+            },
+            medReport: {
+              name: '박진혁',
+              id: 'SEC-04-3319',
+              temp: 36.7,
+              result: 'CLEAR (정상)',
+              exp: addDays(currentDate, 4)
+            },
+            vitals: { temp: 36.7, bpm: 84, antigen: 'NEGATIVE (음성)' },
+            dialogue: '저기... 형님(박진수 보급관)한테 얘기 들으셨죠? 저는 멀쩡합니다. 제발 들어가게 해주세요.',
+            commsMessage: {
+              sender: '박진수 보급관 (보급창고)',
+              roleClass: 'quartermaster',
+              text: '어이, 검문관. 내 동생 진혁이가 거기 도착했어. 출신 거점이 미등록 구역으로 찍혀있긴 한데 바이러스는 절대 아니야. 눈 한 번만 감아주면 창고에서 배급권 25 CR 빼줄게. (단, 사령부 감사에 걸릴 수 있음)'
+            }
+          };
+        }
+
+        if (eventId === 'SCOUT_PASSPHRASE') {
+          const app = PortraitRenderer.generateAppearance('M');
+          app.beardStyle = 'mustache';
+
+          return {
+            type: 'SPECIAL',
+            eventId: 'SCOUT_PASSPHRASE',
+            eventTitle: '지휘부 무전: 수색 정찰대원 귀환',
+            isValid: true,
+            defectReason: '아군 정찰대원 부당 진입 거부',
+            liveAppearance: app,
+            photoAppearance: { ...app },
+            idCard: {
+              name: '최강산 중사',
+              dob: '1990.02.19',
+              gender: 'M',
+              sector: '중앙 방주 시타델',
+              outpost: '알파 돔',
+              id: 'SEC-01-0077',
+              exp: addDays(currentDate, 90)
+            },
+            medReport: null, // 야전 작전 중이라 소견서 없음
+            vitals: { temp: 36.8, bpm: 92, antigen: 'NEGATIVE (음성)' },
+            dialogue: '제3수색대 최강산 중사다! 교전 중에 검역 소견서를 분실했다. 암구호는 [새벽의 방패]다. 사령관님께 확인해 봐!',
+            commsMessage: {
+              sender: '강철호 사령관 (지휘통제실)',
+              roleClass: 'commander',
+              text: '검문관, 외곽 정찰을 나갔던 최강산 중사가 복귀 중이다. 검역 소견서가 없더라도 생체 스캔이 음성이며 암구호 [새벽의 방패]를 대면 즉시 [격리 통과]시켜라!'
+            }
+          };
+        }
+
+        if (eventId === 'SUDDEN_MUTATION') {
+          const app = PortraitRenderer.generateAppearance('M');
+          app.infectedSkin = true;
+          app.bloodshotEyes = true;
+          app.sweating = true;
+          app.biteMark = true;
+
+          return {
+            type: 'PANIC_MUTATION',
+            eventId: 'SUDDEN_MUTATION',
+            eventTitle: '⚠️ 돌발 사태: 잠복기 감염자 급성 변이!',
+            isValid: false,
+            defectReason: '변이 진행자 에어록 폐쇄 지연',
+            liveAppearance: app,
+            photoAppearance: { ...app, infectedSkin: false, bloodshotEyes: false, sweating: false, biteMark: false },
+            idCard: {
+              name: '임성철',
+              dob: '1988.06.30',
+              gender: 'M',
+              sector: '남부 지하 방공호',
+              outpost: '메트로 4호선',
+              id: 'SEC-11-6201',
+              exp: addDays(currentDate, 60)
+            },
+            medReport: {
+              name: '임성철',
+              id: 'SEC-11-6201',
+              temp: 36.6,
+              result: 'CLEAR (잠복기 누락)',
+              exp: addDays(currentDate, 3)
+            },
+            vitals: { temp: 41.3, bpm: 178, antigen: 'CRITICAL (급성 변이 진행 중!)' },
+            dialogue: '크아아악!! 머리가... 피부가 타들어 가... 문을 열어... 열어어어!!'
+          };
+        }
+
+        return null;
+      }
+    }
+
+    /* ========================================================================
+       6. 메인 게임 엔진
+       ======================================================================== */
+    class QuarantineGame {
+      constructor() {
+        this.baseDate = { year: 2034, month: 9, day: 14 };
+        this.day = 1;
+        this.credits = 25;
+        this.warnings = 0;
+        this.maxWarnings = 3;
+
+        this.shiftDuration = 90; // 하루 교대 시간 (초)
+        this.timeLeft = this.shiftDuration;
+        this.timerInterval = null;
+        this.blinkInterval = null;
+        this.typewriterInterval = null;
+        this.panicInterval = null;
+
+        this.currentEntrant = null;
+        this.isScanned = false;
+        this.isProcessingStamp = false;
+        this.topZIndex = 10;
+
+        this.dailyStats = {
+          processed: 0,
+          correct: 0,
+          wrong: 0,
+          bonus: 0
+        };
+
+        this.dailyDirectives = {
+          bannedSector: null
+        };
+
+        this.bindUIEvents();
+        this.renderZoneTable();
+      }
+
+      getCurrentDate() {
+        return addDays(this.baseDate, this.day - 1);
+      }
+
+      bindUIEvents() {
+        document.getElementById('start-game-btn').addEventListener('click', () => {
+          sfx.init();
+          document.getElementById('start-screen').classList.add('hidden');
+          this.startDay(1);
+        });
+
+        document.getElementById('next-day-btn').addEventListener('click', () => {
+          document.getElementById('eod-modal').classList.add('hidden');
+          this.startDay(this.day + 1);
+        });
+
+        const soundBtn = document.getElementById('sound-toggle-btn');
+        soundBtn.addEventListener('click', () => {
+          const on = sfx.toggle();
+          soundBtn.textContent = on ? '🔊 SFX ON' : '🔇 SFX OFF';
+        });
+
+        // 탭 전환
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            sfx.playPaper();
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.tab).classList.add('active');
+
+            // 통신 탭 확인 시 배지 제거
+            if (btn.dataset.tab === 'tab-comms') {
+              const badge = btn.querySelector('.tab-badge');
+              if (badge) badge.remove();
+            }
+          });
+        });
+
+        // 생체 스캔 실행 버튼
+        document.getElementById('btn-scan').addEventListener('click', () => this.runBioScan());
+
+        // 승인 / 거부 도장 버튼
+        document.getElementById('btn-approve').addEventListener('click', () => this.handleDecision(true));
+        document.getElementById('btn-deny').addEventListener('click', () => this.handleDecision(false));
+
+        // 서류 정렬 버튼
+        document.getElementById('arrange-btn').addEventListener('click', () => {
+          sfx.playPaper();
+          this.arrangeDocuments();
+        });
+      }
+
+      renderZoneTable() {
+        const table = document.getElementById('zone-table-body');
+        let html = '<tr><th>소속 생존 구역</th><th>공식 등록 거점</th></tr>';
+        WORLD_DATA.sectors.forEach(s => {
+          html += `<tr><td><strong>${s.name}</strong><br><span style="font-size:0.7rem;color:#849687;">(${s.code})</span></td><td>${s.outposts.join(', ')}</td></tr>`;
+        });
+        table.innerHTML = html;
+      }
+
+      setupDailyDirectives() {
+        this.dailyDirectives = { bannedSector: null };
+
+        if (this.day >= 3) {
+          const outerSectors = WORLD_DATA.sectors.filter(s => s.code !== 'SEC-01');
+          const banned = outerSectors[(this.day - 3) % outerSectors.length];
+          this.dailyDirectives.bannedSector = banned.name;
+        }
+
+        this.renderRulebook();
+      }
+
+      renderRulebook() {
+        const container = document.getElementById('tab-rules');
+        const todayStr = formatDate(this.getCurrentDate());
+
+        let html = `
+          <div style="margin-bottom:9px; color:var(--accent-amber); font-weight:bold;">
+            📅 기준 일자: ${todayStr} (${this.day}일차 방역 지침)
+          </div>
+          <div class="rule-card">
+            <strong>1. 바이러스 무감염 원칙</strong><br>
+            정상 체온(<strong>37.5°C 이하</strong>), 음성 판정 대상자만 통과 가능합니다. 충혈된 눈, 녹색 피부 반점, 목의 교상 흔적이 있으면 즉시 거부하십시오.
+          </div>
+          <div class="rule-card">
+            <strong>2. 생존자 신분증 대조</strong><br>
+            신분증 유효기간이 <strong>${todayStr}</strong> 이상이어야 하며, 사진과 실제 외모·출신 거점이 일치해야 합니다.
+          </div>
+        `;
+
+        if (this.day >= 2) {
+          html += `
+            <div class="rule-card ${this.day === 2 ? 'new-rule' : ''}">
+              ${this.day === 2 ? '<span class="rule-badge">NEW</span>' : ''}
+              <strong>3. 검역 소견서 필수 지참</strong><br>
+              모든 생존자는 유효한 <strong>검역 소견서</strong>를 제출해야 하며, 신분증 번호와 일치해야 합니다. (단, 사령부 승인 정찰대 제외)
+            </div>
+          `;
+        }
+
+        if (this.day >= 3 && this.dailyDirectives.bannedSector) {
+          html += `
+            <div class="rule-card new-rule">
+              <span class="rule-badge">긴급 봉쇄</span>
+              <strong>4. 오염 구역 전면 차단</strong><br>
+              대규모 변이 발생으로 금일 <strong>[${this.dailyDirectives.bannedSector}]</strong> 출신자의 진입을 전면 금지합니다.
+            </div>
+          `;
+        }
+
+        container.innerHTML = html;
+      }
+
+      addCommsMessage(sender, roleClass, text) {
+        const list = document.getElementById('comms-list');
+        const card = document.createElement('div');
+        card.className = `comms-card ${roleClass}`;
+        card.innerHTML = `
+          <div class="comms-sender">
+            <span>📻 ${sender}</span>
+            <span style="font-size:0.72rem; color:var(--text-dim);">DAY ${this.day}</span>
+          </div>
+          <div style="font-size:0.82rem; line-height:1.45;">${text}</div>
+        `;
+        list.prepend(card);
+
+        // 현재 통신 탭이 활성화되어 있지 않다면 알림 배지 표시
+        const commsBtn = document.getElementById('comms-tab-btn');
+        if (!commsBtn.classList.contains('active') && !commsBtn.querySelector('.tab-badge')) {
+          const badge = document.createElement('span');
+          badge.className = 'tab-badge';
+          badge.textContent = 'NEW';
+          commsBtn.appendChild(badge);
+        }
+        sfx.playRadio();
+      }
+
+      startDay(dayNum) {
+        this.day = dayNum;
+        this.timeLeft = this.shiftDuration;
+        this.dailyStats = { processed: 0, correct: 0, wrong: 0, bonus: 0 };
+        document.getElementById('log-list').innerHTML = '';
+        document.getElementById('comms-list').innerHTML = '';
+
+        this.setupDailyDirectives();
+        this.updateTopBar();
+
+        // 일차 시작 시 사령관 브리핑 무전
+        if (this.day === 1) {
+          this.addCommsMessage(
+            '강철호 사령관 (지휘통제실)',
+            'commander',
+            '제9격리구역에 온 걸 환영한다. 놈들은 겉보기에 멀쩡해 보여도 열이 오르고 눈이 붉어지며 곧 괴물로 변한다. 반드시 [생체 스캔]을 생활화해라.'
+          );
+        } else if (this.day === 2) {
+          this.addCommsMessage(
+            '한소연 수석 의무관 (의무실)',
+            'doctor',
+            '오늘부터 외곽 1차 검역소에서 발급한 [검역 소견서]를 함께 확인해 주세요. 간혹 소견서를 위조해 들어오는 감염자가 있으니 실제 생체 스캔 수치와 꼭 비교하셔야 합니다!'
+          );
+        } else {
+          this.addCommsMessage(
+            '강철호 사령관 (지휘통제실)',
+            'commander',
+            `금일부로 [${this.dailyDirectives.bannedSector}] 방역선이 붕괴되었다. 해당 구역 출신자는 예외 없이 진입을 거부해라.`
+          );
+        }
+
+        this.startShiftTimer();
+        this.startBlinkLoop();
+        this.callNextEntrant();
+      }
+
+      updateTopBar() {
+        document.getElementById('day-display').textContent = `DAY ${this.day}`;
+        document.getElementById('date-display').textContent = formatDate(this.getCurrentDate());
+        document.getElementById('credits-display').textContent = `${this.credits} CR`;
+
+        const timerEl = document.getElementById('timer-display');
+        const mins = String(Math.floor(this.timeLeft / 60)).padStart(2, '0');
+        const secs = String(this.timeLeft % 60).padStart(2, '0');
+        timerEl.textContent = `${mins}:${secs}`;
+        timerEl.classList.toggle('urgent', this.timeLeft <= 15);
+
+        const pips = document.querySelectorAll('#warning-pips .pip');
+        pips.forEach((pip, idx) => {
+          pip.classList.toggle('active', idx < this.warnings);
+        });
+      }
+
+      startShiftTimer() {
+        clearInterval(this.timerInterval);
+        this.timerInterval = setInterval(() => {
+          this.timeLeft--;
+          this.updateTopBar();
+          if (this.timeLeft <= 0) {
+            clearInterval(this.timerInterval);
+            this.endDay();
+          }
+        }, 1000);
+      }
+
+      startBlinkLoop() {
+        clearInterval(this.blinkInterval);
+        this.blinkInterval = setInterval(() => {
+          if (!this.currentEntrant) return;
+          const canvas = document.getElementById('booth-canvas');
+          PortraitRenderer.draw(canvas, this.currentEntrant.liveAppearance, true, false, this.isScanned);
+          setTimeout(() => {
+            if (this.currentEntrant) {
+              PortraitRenderer.draw(canvas, this.currentEntrant.liveAppearance, false, false, this.isScanned);
+            }
+          }, 140);
+        }, 3000);
+      }
+
+      // 어떤 특수 이벤트를 등장시킬지 결정
+      pickEventForTurn() {
+        const turn = this.dailyStats.processed + 1;
+        if (this.day === 1 && turn === 3) return 'BRIBE_INFECTED';
+        if (this.day === 2 && turn === 2) return 'VACCINE_RESEARCHER';
+        if (this.day === 2 && turn === 4) return 'SCOUT_PASSPHRASE';
+        if (this.day === 3 && turn === 2) return 'QUARTERMASTER_BROTHER';
+        if (this.day >= 3 && turn === 4) return 'SUDDEN_MUTATION';
+        // 4일차 이상에서는 20% 확률로 특수 이벤트 재등장
+        if (this.day >= 4 && Math.random() < 0.22) {
+          const pool = ['BRIBE_INFECTED', 'VACCINE_RESEARCHER', 'QUARTERMASTER_BROTHER', 'SUDDEN_MUTATION'];
+          return pool[Math.floor(Math.random() * pool.length)];
+        }
+        return null;
+      }
+
+      callNextEntrant() {
+        if (this.timeLeft <= 0) return;
+
+        this.clearPanicMode();
+        this.isProcessingStamp = false;
+        this.isScanned = false;
+        this.clearDesk();
+
+        const feedback = document.getElementById('feedback-banner');
+        feedback.className = '';
+        feedback.style.display = 'none';
+
+        const scanBox = document.getElementById('scan-result-box');
+        scanBox.className = '';
+        scanBox.style.display = 'none';
+
+        const shutter = document.getElementById('booth-shutter');
+        shutter.classList.add('closed');
+        sfx.playShutter();
+
+        setTimeout(() => {
+          const specialId = this.pickEventForTurn();
+          if (specialId) {
+            this.currentEntrant = SurvivorGenerator.generateSpecialEvent(specialId, this.getCurrentDate());
+          } else {
+            this.currentEntrant = SurvivorGenerator.generateNormal(
+              this.day,
+              this.getCurrentDate(),
+              this.dailyDirectives
+            );
+          }
+
+          // 창구 초상화 렌더링
+          const boothCanvas = document.getElementById('booth-canvas');
+          PortraitRenderer.draw(boothCanvas, this.currentEntrant.liveAppearance, false, false, false);
+
+          shutter.classList.remove('closed');
+
+          const isSpecial = this.currentEntrant.type !== 'NORMAL';
+          document.getElementById('speaker-label').textContent = `대기 생존자 #${this.dailyStats.processed + 1}`;
+          const specialTag = document.getElementById('special-tag');
+          specialTag.style.display = isSpecial ? 'inline' : 'none';
+          if (isSpecial) specialTag.textContent = `[${this.currentEntrant.eventTitle}]`;
+
+          // 내부 인물 무전이 포함된 특수 이벤트라면 무전 수신 처리
+          if (this.currentEntrant.commsMessage) {
+            const cm = this.currentEntrant.commsMessage;
+            this.addCommsMessage(cm.sender, cm.roleClass, cm.text);
+          }
+
+          const isInfectedVisual = this.currentEntrant.liveAppearance.bloodshotEyes || this.currentEntrant.liveAppearance.infectedSkin;
+          this.typeDialogue(
+            this.currentEntrant.dialogue,
+            this.currentEntrant.liveAppearance.gender === 'F',
+            isInfectedVisual
+          );
+
+          this.spawnDocumentsOnDesk(this.currentEntrant);
+
+          document.getElementById('btn-scan').disabled = false;
+          document.getElementById('btn-approve').disabled = false;
+          document.getElementById('btn-deny').disabled = false;
+
+          // 돌발 변이 이벤트인 경우 긴급 카운트다운 작동
+          if (this.currentEntrant.type === 'PANIC_MUTATION') {
+            this.startPanicMode();
+          }
+        }, 360);
+      }
+
+      // 돌발 변이 경보 (8초 내 진입 거부 필수)
+      startPanicMode() {
+        document.body.classList.add('emergency-mode');
+        const bar = document.getElementById('panic-timer-bar');
+        const countEl = document.getElementById('panic-countdown');
+        bar.classList.remove('hidden');
+
+        let remain = 8.0;
+        sfx.playAlarm();
+
+        this.panicInterval = setInterval(() => {
+          remain -= 0.1;
+          countEl.textContent = `${Math.max(0, remain).toFixed(1)}s`;
+          if (Math.abs(remain - 5.0) < 0.06 || Math.abs(remain - 2.5) < 0.06) {
+            sfx.playAlarm();
+          }
+          if (remain <= 0) {
+            this.clearPanicMode();
+            // 시간 초과 시 강제 오심(변이체 난동) 처리
+            this.handleDecision(true, true);
+          }
+        }, 100);
+      }
+
+      clearPanicMode() {
+        clearInterval(this.panicInterval);
+        document.body.classList.remove('emergency-mode');
+        document.getElementById('panic-timer-bar').classList.add('hidden');
+      }
+
+      // 생체 스캔 실행
+      runBioScan() {
+        if (!this.currentEntrant || this.isScanned) return;
+        this.isScanned = true;
+        sfx.playScan();
+
+        const boothCanvas = document.getElementById('booth-canvas');
+        PortraitRenderer.draw(boothCanvas, this.currentEntrant.liveAppearance, false, false, true);
+
+        const v = this.currentEntrant.vitals;
+        const isHighTemp = v.temp >= 37.6;
+        const scanBox = document.getElementById('scan-result-box');
+        scanBox.style.display = 'block';
+        scanBox.className = isHighTemp ? 'danger' : '';
+        scanBox.innerHTML = `
+          <strong>[생체 스캔 완료]</strong><br>
+          • 체온: <strong>${v.temp}°C</strong> (${isHighTemp ? '고열 위험!' : '정상'}) | 심박: ${v.bpm} BPM<br>
+          • 항원 반응: <strong>${v.antigen}</strong>
+        `;
+      }
+
+      typeDialogue(text, isFemale, isInfected) {
+        clearInterval(this.typewriterInterval);
+        const el = document.getElementById('dialogue-text');
+        el.textContent = '';
+        let i = 0;
+        this.typewriterInterval = setInterval(() => {
+          if (i < text.length) {
+            el.textContent += text[i];
+            if (i % 2 === 0 && text[i] !== ' ') {
+              sfx.playVoiceBeep(isFemale, isInfected);
+            }
+            i++;
+          } else {
+            clearInterval(this.typewriterInterval);
+          }
+        }, 28);
+      }
+
+      clearDesk() {
+        const desk = document.getElementById('desk-surface');
+        desk.querySelectorAll('.doc-card').forEach(el => el.remove());
+      }
+
+      spawnDocumentsOnDesk(entrant) {
+        const desk = document.getElementById('desk-surface');
+        sfx.playPaper();
+
+        // 1. 생존자 신분증
+        const idc = entrant.idCard;
+        const idEl = document.createElement('div');
+        idEl.className = 'doc-card id-doc';
+        idEl.id = 'doc-id';
+        idEl.style.left = '34px';
+        idEl.style.top = '34px';
+        idEl.style.zIndex = ++this.topZIndex;
+
+        idEl.innerHTML = `
+          <div class="id-top-banner">${idc.sector} // 생존자 신분증</div>
+          <div class="id-body">
+            <div class="id-photo-box">
+              <canvas id="id-canvas" width="64" height="64"></canvas>
+            </div>
+            <div class="doc-fields">
+              <div class="field-row">
+                <span class="field-label">성명 (NAME)</span>
+                <span class="field-value">${idc.name}</span>
+              </div>
+              <div class="field-row" style="display:flex; justify-content:space-between;">
+                <div>
+                  <span class="field-label">생년월일 (DOB)</span>
+                  <span class="field-value">${idc.dob}</span>
+                </div>
+                <div>
+                  <span class="field-label">성별 (SEX)</span>
+                  <span class="field-value">${idc.gender}</span>
+                </div>
+              </div>
+              <div class="field-row">
+                <span class="field-label">출신 거점 (ORIGIN)</span>
+                <span class="field-value">${idc.outpost}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">유효기간 (EXP)</span>
+                <span class="field-value">${formatDate(idc.exp)}</span>
+              </div>
+            </div>
+          </div>
+          <div class="stamp-zone" id="id-stamp-zone">
+            <span class="stamp-zone-hint">[ 에어록 검문 날인란 ]</span>
+          </div>
+          <div class="id-mrz">
+            ID: <strong>${idc.id}</strong> &lt;&lt; SECTOR-09
+          </div>
+        `;
+
+        desk.appendChild(idEl);
+        this.makeDraggable(idEl);
+
+        const idCanvas = idEl.querySelector('#id-canvas');
+        PortraitRenderer.draw(idCanvas, entrant.photoAppearance, false, true, false);
+
+        // 2. 검역 소견서
+        if (entrant.medReport) {
+          const mr = entrant.medReport;
+          const medEl = document.createElement('div');
+          medEl.className = 'doc-card med-doc';
+          medEl.id = 'doc-med';
+          medEl.style.left = '372px';
+          medEl.style.top = '48px';
+          medEl.style.zIndex = ++this.topZIndex;
+
+          medEl.innerHTML = `
+            <div class="med-header">
+              <div>
+                <div style="font-size:0.65rem; color:#2e4d43;">1차 외곽 방역검역소</div>
+                <div class="med-title">검역 소견서 (MED-CLEARANCE)</div>
+              </div>
+              <div class="med-cross">+</div>
+            </div>
+            <div class="doc-fields">
+              <div class="field-row">
+                <span class="field-label">대상자 성명</span>
+                <span class="field-value">${mr.name}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">신분증 번호 (ID NO.)</span>
+                <span class="field-value">${mr.id}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">1차 측정 체온 / 소견</span>
+                <span class="field-value">${mr.temp}°C // ${mr.result}</span>
+              </div>
+              <div class="field-row">
+                <span class="field-label">소견서 유효기한</span>
+                <span class="field-value">${formatDate(mr.exp)}</span>
+              </div>
+            </div>
+          `;
+
+          desk.appendChild(medEl);
+          this.makeDraggable(medEl);
+        }
+
+        // 3. 특수 상황 메모지
+        if (entrant.noteText) {
+          const noteEl = document.createElement('div');
+          noteEl.className = 'doc-card note-doc';
+          noteEl.style.left = '376px';
+          noteEl.style.top = '54px';
+          noteEl.style.zIndex = ++this.topZIndex;
+          noteEl.innerHTML = `<div style="white-space:pre-line; line-height:1.45; font-weight:bold;">${entrant.noteText}</div>`;
+          desk.appendChild(noteEl);
+          this.makeDraggable(noteEl);
+        }
+      }
+
+      arrangeDocuments() {
+        const idDoc = document.getElementById('doc-id');
+        const medDoc = document.getElementById('doc-med');
+        if (idDoc) {
+          idDoc.style.left = '34px';
+          idDoc.style.top = '34px';
+        }
+        if (medDoc) {
+          medDoc.style.left = '372px';
+          medDoc.style.top = '48px';
+        }
+      }
+
+      makeDraggable(el) {
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let origLeft = 0, origTop = 0;
+
+        const onDown = (clientX, clientY) => {
+          isDragging = true;
+          el.style.zIndex = ++this.topZIndex;
+          sfx.playPaper();
+          startX = clientX;
+          startY = clientY;
+          origLeft = el.offsetLeft;
+          origTop = el.offsetTop;
+        };
+
+        const onMove = (clientX, clientY) => {
+          if (!isDragging) return;
+          const desk = document.getElementById('desk-surface');
+          const maxLeft = Math.max(0, desk.clientWidth - el.offsetWidth);
+          const maxTop = Math.max(0, desk.clientHeight - el.offsetHeight);
+          el.style.left = `${Math.min(maxLeft, Math.max(0, origLeft + (clientX - startX)))}px`;
+          el.style.top = `${Math.min(maxTop, Math.max(0, origTop + (clientY - startY)))}px`;
+        };
+
+        const onUp = () => { isDragging = false; };
+
+        el.addEventListener('mousedown', (e) => { e.preventDefault(); onDown(e.clientX, e.clientY); });
+        window.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', onUp);
+
+        el.addEventListener('touchstart', (e) => {
+          const t = e.touches[0];
+          onDown(t.clientX, t.clientY);
+        }, { passive: true });
+        window.addEventListener('touchmove', (e) => {
+          if (!isDragging) return;
+          const t = e.touches[0];
+          onMove(t.clientX, t.clientY);
+        }, { passive: true });
+        window.addEventListener('touchend', onUp);
+      }
+
+      // 승인(true) / 거부(false) 판정 로직
+      handleDecision(approved, forcedPanicFail = false) {
+        if (this.isProcessingStamp || !this.currentEntrant) return;
+        this.isProcessingStamp = true;
+        this.clearPanicMode();
+
+        document.getElementById('btn-scan').disabled = true;
+        document.getElementById('btn-approve').disabled = true;
+        document.getElementById('btn-deny').disabled = true;
+
+        sfx.playStamp();
+        const stampZone = document.getElementById('id-stamp-zone');
+        if (stampZone && !forcedPanicFail) {
+          stampZone.innerHTML = `
+            <div class="ink-stamp ${approved ? 'approved' : 'denied'}">
+              ${approved ? 'QUARANTINE PASS' : 'ENTRY DENIED'}
+              <span class="ink-stamp-sub">SECTOR-09 // ${formatDate(this.getCurrentDate())}</span>
+            </div>
+          `;
+        }
+
+        const ent = this.currentEntrant;
+        this.dailyStats.processed++;
+
+        const feedback = document.getElementById('feedback-banner');
+        const logList = document.getElementById('log-list');
+        const logItem = document.createElement('div');
+
+        // 특수 이벤트 전용 분기 처리
+        if (ent.eventId === 'BRIBE_INFECTED' && approved) {
+          this.dailyStats.wrong++;
+          this.credits += 30;
+          this.warnings++;
+          sfx.playCitation();
+
+          feedback.className = 'bad';
+          feedback.textContent = `⚠️ 뇌물 수뢰 (+30 CR) / 방역 위반 경고 (${this.warnings}/${this.maxWarnings})`;
+          this.printCitation('감염자 뇌물 수뢰 및 격리구역 무단 반입');
+          this.addCommsMessage('강철호 사령관 (지휘통제실)', 'commander', '방금 에어록 통과자 때문에 내부 경보가 울렸다! 무슨 짓을 한 건가, 검문관!');
+
+          logItem.className = 'log-item event';
+          logItem.textContent = `[특수/경고] ${ent.idCard.name} 뇌물 통과 (+30 CR, 경고 +1)`;
+          this.finishTurn(logList, logItem, 2200);
+          return;
+        }
+
+        if (ent.eventId === 'QUARTERMASTER_BROTHER' && approved) {
+          this.dailyStats.correct++;
+          this.credits += 25;
+          sfx.playSuccess();
+
+          feedback.className = 'ok';
+          feedback.textContent = `✔ 보급관 비밀 거래 성사 (+25 CR)`;
+          this.addCommsMessage('박진수 보급관 (보급창고)', 'quartermaster', '고맙네! 진혁이는 무사히 안으로 데려왔어. 약속한 25 CR은 자네 사물함에 넣어뒀지.');
+
+          logItem.className = 'log-item event';
+          logItem.textContent = `[특수/거래] ${ent.idCard.name} 청탁 통과 (+25 CR)`;
+          this.finishTurn(logList, logItem, 1600);
+          return;
+        }
+
+        if (ent.eventId === 'VACCINE_RESEARCHER' && approved) {
+          this.dailyStats.correct++;
+          this.credits += 20;
+          sfx.playSuccess();
+
+          feedback.className = 'ok';
+          feedback.textContent = `✔ 항체 연구원 특별 통과 (+20 CR 포상)`;
+          this.addCommsMessage('한소연 수석 의무관 (의무실)', 'doctor', '감사합니다! 윤 박사님이 가져온 항체 샘플 덕분에 백신 배양을 이어갈 수 있게 됐어요. 특별 포상 20 CR을 승인했습니다!');
+
+          logItem.className = 'log-item event';
+          logItem.textContent = `[특수/성공] ${ent.idCard.name} 백신 연구원 통과 (+20 CR)`;
+          this.finishTurn(logList, logItem, 1600);
+          return;
+        }
+
+        // 일반 판정 및 나머지 특수 이벤트 정오답 처리
+        const isCorrect = !forcedPanicFail && (approved === ent.isValid);
+
+        if (isCorrect) {
+          this.dailyStats.correct++;
+          this.credits += 10;
+          sfx.playSuccess();
+
+          feedback.className = 'ok';
+          feedback.textContent = `✔ 방역 판정 정확 (+10 CR) - ${approved ? '격리 통과' : '진입 거부'}`;
+
+          this.typeDialogue(
+            approved ? '고맙습니다... 인류에 희망이 있기를.' : '안 돼... 제발 문을 열어줘...!',
+            ent.liveAppearance.gender === 'F',
+            false
+          );
+
+          logItem.className = 'log-item pass';
+          logItem.textContent = `[정확] ${ent.idCard.name} (${approved ? '통과' : '거부'}) +10 CR`;
+        } else {
+          this.dailyStats.wrong++;
+          this.warnings++;
+          sfx.playCitation();
+
+          const violationText = forcedPanicFail
+            ? '급성 변이 진행자 에어록 폐쇄 지연 (격리 실패)'
+            : (approved
+              ? `결격자 부당 통과: ${ent.defectReason}`
+              : `적격자 부당 거부: ${ent.defectReason || '방역 기준 모두 충족'}`);
+
+          feedback.className = 'bad';
+          feedback.textContent = `✖ 징계 경고장 발부 (${this.warnings}/${this.maxWarnings})`;
+          this.printCitation(violationText);
+
+          logItem.className = 'log-item fail';
+          logItem.textContent = `[오심] ${ent.idCard.name} - ${violationText}`;
+        }
+
+        this.finishTurn(logList, logItem, isCorrect ? 1250 : 2150);
+      }
+
+      finishTurn(logList, logItem, delayMs) {
+        logList.prepend(logItem);
+        this.updateTopBar();
+
+        if (this.warnings >= this.maxWarnings) {
+          setTimeout(() => {
+            clearInterval(this.timerInterval);
+            this.triggerGameOver(
+              '방역 규정 위반 경고 3회 누적',
+              '지휘통제실은 반복된 검문 과실로 격리구역 전체를 위험에 빠뜨린 귀하를 즉각 파면하고 외부 구역으로 추방합니다.'
+            );
+          }, 1500);
+          return;
+        }
+
+        setTimeout(() => {
+          if (this.timeLeft > 0) {
+            this.callNextEntrant();
+          }
+        }, delayMs);
+      }
+
+      printCitation(reason) {
+        const desk = document.getElementById('desk-surface');
+        const cite = document.createElement('div');
+        cite.className = 'doc-card citation-doc';
+        cite.style.left = '210px';
+        cite.style.bottom = '24px';
+        cite.style.zIndex = ++this.topZIndex;
+
+        cite.innerHTML = `
+          <div class="citation-header">
+            <span>지휘통제실 징계 경고장</span>
+            <span>경고 ${this.warnings} / ${this.maxWarnings}</span>
+          </div>
+          <div style="line-height:1.45;">
+            <strong>위반 내역:</strong><br>
+            ${reason}<br>
+            <span style="font-size:0.72rem; color:#821c1c;">
+              ※ 경고 3회 누적 시 즉시 격리구역 밖으로 추방됩니다.
+            </span>
+          </div>
+        `;
+        desk.appendChild(cite);
+        this.makeDraggable(cite);
+      }
+
+      endDay() {
+        this.clearPanicMode();
+        document.getElementById('btn-scan').disabled = true;
+        document.getElementById('btn-approve').disabled = true;
+        document.getElementById('btn-deny').disabled = true;
+        document.getElementById('booth-shutter').classList.add('closed');
+        sfx.playShutter();
+
+        const basePay = this.dailyStats.correct * 10;
+        const upkeepCost = 20; // 매일 식량 배급 및 방호복 필터 교체비
+        this.credits -= upkeepCost;
+        this.updateTopBar();
+
+        document.getElementById('eod-title').textContent = `${this.day}일차 에어록 근무 정산`;
+        document.getElementById('eod-table').innerHTML = `
+          <tr><td>금일 검문 인원</td><td>총 ${this.dailyStats.processed}명 (정확 ${this.dailyStats.correct} / 오심 ${this.dailyStats.wrong})</td></tr>
+          <tr><td>기본 검문 수당 (+10 CR × ${this.dailyStats.correct})</td><td style="color:var(--accent-bio);">+${basePay} CR</td></tr>
+          <tr><td>숙소 배급 및 방호 필터 유지비</td><td style="color:var(--accent-red);">-${upkeepCost} CR</td></tr>
+          <tr><td>누적 징계 경고</td><td>${this.warnings} / ${this.maxWarnings}</td></tr>
+          <tr style="font-size:1.05rem;"><td><strong>최종 보유 배급권</strong></td><td style="color:${this.credits < 0 ? 'var(--accent-red)' : 'var(--accent-amber)'};">${this.credits} CR</td></tr>
+        `;
+
+        if (this.credits < 0) {
+          this.triggerGameOver(
+            '배급권 고갈 (생존 유지 실패)',
+            '보유 배급권이 바닥나 식량과 방호 필터를 구할 수 없게 되었습니다. 격리구역 내 거주가 말소됩니다.'
+          );
+          return;
+        }
+
+        document.getElementById('eod-modal').classList.remove('hidden');
+      }
+
+      triggerGameOver(title, reason) {
+        document.getElementById('gameover-title').textContent = title;
+        document.getElementById('gameover-reason').innerHTML = `
+          <strong>${reason}</strong><br><br>
+          • 최종 생존 기간: <strong>${this.day}일차</strong><br>
+          • 최종 보유 배급권: <strong>${this.credits} CR</strong>
+        `;
+        document.getElementById('gameover-modal').classList.remove('hidden');
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      window.game = new QuarantineGame();
+    });
+  </script>
+</body>
+</html>
