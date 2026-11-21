@@ -1,0 +1,79 @@
+<style>
+/* =========================================================
+   도트 무대 (배경 + 초상) / 대화창 / 선택지
+   ========================================================= */
+.scene-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 6px 0 8px; flex-wrap: wrap; }
+.scene-head .t { color: var(--cyan); letter-spacing: .12em; font-size: 13px; }
+.scene-head .t b { color: var(--mag); font-weight: normal; }
+.scene-head .r { color: var(--dim); font-size: 12px; }
+.stage {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 54vh; overflow: hidden;
+  background: #000; border: 1px solid var(--line); box-shadow: 0 0 30px rgba(0,240,255,.07);
+}
+.stage canvas.bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; image-rendering: crisp-edges; }
+.stage canvas.pt { position: absolute; bottom: 0; left: 50%; height: 94%; transform: translateX(-50%); image-rendering: pixelated; image-rendering: crisp-edges; transition: opacity .2s, transform .2s; }
+.stage canvas.pt.off { opacity: 0; transform: translateX(-50%) translateY(6%); }
+.stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,.55)); }
+.stage .loc { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 12px; padding: 2px 8px; background: rgba(5,5,12,.78); border: 1px solid var(--line); color: var(--cyan); }
+.stage.short { aspect-ratio: 16 / 6; max-height: 30vh; }
+.stage.flash { animation: stageFlash .5s steps(3); }
+@keyframes stageFlash { 0% { filter: brightness(3) saturate(0); } 100% { filter: none; } }
+
+.vn {
+  position: relative; margin-top: -1px; border: 1px solid var(--line); border-top: 2px solid var(--cyan);
+  background: rgba(8,8,18,.97); padding: 12px 14px 28px; min-height: 124px; cursor: pointer; user-select: none;
+}
+.vn-name { display: inline-block; font-size: 13px; padding: 1px 10px; margin-bottom: 6px; background: var(--cyan); color: #001014; font-weight: bold; letter-spacing: .05em; }
+.vn-name.me { background: var(--mag); color: #fff; }
+.vn-name.narr { background: transparent; color: var(--dim); padding: 0; font-weight: normal; }
+.vn-text { font-size: 16px; line-height: 1.7; min-height: 3.4em; }
+.vn-text p { margin: 0; }
+.vn-text.narr { color: #aeb8d4; }
+.vn-next { position: absolute; right: 12px; bottom: 6px; font-size: 12px; color: var(--cyan); animation: bob .9s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(3px); opacity: .5; } }
+.vn-next.hidden { display: none; }
+.vn .hint { position: absolute; left: 14px; bottom: 6px; font-size: 11px; color: var(--dim); }
+
+.choices { display: grid; gap: 8px; margin-top: 10px; }
+.choice {
+  font: inherit; text-align: left; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-left: 3px solid var(--mag); padding: 12px 14px; min-height: 46px; cursor: pointer; font-size: 15px; transition: .15s;
+}
+.choice:hover { border-color: var(--mag); background: rgba(255,43,214,.08); }
+.choice::before { content: '▸ '; color: var(--mag); }
+.choice.end { border-left-color: var(--cyan); }
+.choice.end::before { color: var(--cyan); }
+.choice .note { display: block; font-size: 12px; color: var(--yellow); margin-top: 2px; }
+
+/* 저녁 지도 */
+.loc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.loc-card { font: inherit; color: var(--text); text-align: left; background: var(--panel); border: 1px solid var(--line); padding: 0; cursor: pointer; overflow: hidden; transition: .15s; position: relative; }
+.loc-card:hover { border-color: var(--cyan); box-shadow: 0 0 16px rgba(0,240,255,.25); }
+.loc-card canvas { display: block; width: 100%; aspect-ratio: 16 / 9; image-rendering: pixelated; }
+.loc-card .info { padding: 8px 10px 10px; }
+.loc-card .nm { font-weight: bold; color: var(--cyan); }
+.loc-card .ds { font-size: 12px; color: var(--dim); }
+.loc-card .badge { position: absolute; top: 6px; right: 6px; font-size: 11px; padding: 1px 6px; background: var(--mag); color: #fff; }
+.loc-card .badge.key { background: var(--yellow); color: #111; }
+
+/* 밤: 하린 원격 모니터 */
+.monitor { background: #020806; border: 2px solid #1d5a40; padding: 10px; text-align: center; box-shadow: inset 0 0 30px rgba(57,255,159,.08), 0 0 18px rgba(57,255,159,.12); }
+.monitor canvas { width: 144px; height: 162px; image-rendering: pixelated; background: #06140e; border: 1px solid #12402c; }
+.monitor .cap { color: #6fbf98; font-size: 12px; margin-top: 6px; }
+.monitor.glitch canvas { animation: portrait .35s steps(3) infinite; }
+
+/* 시술 화면 */
+.client-tools { margin-top: 12px; }
+.clue-list { list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.clue-list li { padding: 8px 10px; background: var(--panel); border-left: 3px solid var(--yellow); }
+.end-art { margin-bottom: 12px; }
+
+@media (max-width: 680px) {
+  .stage { max-height: none; }
+  .vn { min-height: 132px; padding: 10px 12px 26px; }
+  .vn-text { font-size: 15px; }
+  .loc-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .loc-card .ds { display: none; }
+  .monitor canvas { width: 112px; height: 126px; }
+}
+</style>
