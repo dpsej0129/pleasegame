@@ -277,7 +277,7 @@ registerAct({
       actions: [{ label: '🔒 증언 보존 (지우지 않고 봉인 복사)', note: '별의 기억을 봉인 칩에 복사했다. 지우지 않았다.', do: (s, c) => { c.preserve = true; }, finish: 'refuse' }],
       resolve: (s, r) => {
         const c = s.client;
-        if (c.preserve) { r.outcome = 'preserved'; s.flags.byulHelp = 'preserve'; addTrust('byul', 2); return; }
+        if (c.preserve) { r.outcome = 'preserved'; r.pay = 100; s.flags.byulHelp = 'preserve'; addTrust('byul', 2); return; }
         if (r.mode === 'erase') { s.flags.byulHelp = 'erase'; s.flags.byulErased = true; }
         else if (r.mode === 'report') { s.flags.byulHelp = 'report'; s.trust.byul = 0; }
         else if (!s.flags.byulHelp) s.flags.byulHelp = s.flags.byulShelterAsk ? 'shelterAsk' : 'refuse';
@@ -287,13 +287,13 @@ registerAct({
         partial: '별이 현관 쪽을 흘끔 본다. 아직 그 소리가 남았다. 그래도 아까보다는 덜 떤다.',
         damaged: '별이 엄마를 올려다본다. "아줌마는… 누구예요?" 소라의 얼굴에서 핏기가 빠진다.',
         refused: '소라가 고개를 숙인다. 별이 문을 나서며 나를 한 번 돌아본다. 아주 작게 손을 흔든다.',
-        preserved: '별의 기억은 지워지지 않았다. 봉인 칩에 복사되어 아동보호 법원으로 간다. 소라가 칩을 두 손으로 받는다. "…이걸로 접근금지가 나와요?" "나와요."',
+        preserved: '별의 기억은 지워지지 않았다. 봉인 칩에 복사되어 아동보호 법원으로 간다. 소라가 칩을 두 손으로 받는다. "…이걸로 접근금지가 나와요?" "나와요." 소라가 봉투를 내민다. 절반만 받는다.',
         reported: '아동보호국 드론이 도착한다. 소라는 \'불법 시술 시도\'로 연행되고, 별은 혼자 보호 차량에 오른다.',
         timeout: '경보에 별이 의자 밑으로 들어간다. 소라가 아이를 끌어안고 뛰쳐나간다.',
       },
     },
     {
-      id: 'echo3', day: 4, who: 'echo', type: 'erase', pay: 60, meta: '가사 도우미 안드로이드 E-C0 · 세 번째',
+      id: 'echo3', day: 4, who: 'echo', type: 'erase', pay: 80, meta: '가사 도우미 안드로이드 E-C0 · 세 번째',
       cond: s => !['reported'].includes(s.outcomes.echo1) && !['reported'].includes(s.outcomes.echo2),
       talk: [
         T('echo', '처음 뵙겠습니다. 가사 도우미 E-C0, 에코입니다. 의자님께도—'),
@@ -312,7 +312,7 @@ registerAct({
       cards: () => ECHO_CARDS([{ text: '2088.10.0█ ██:██ ▒▒ 하얀 복도. 침대 바퀴 소리. (데이터 손상)', tags: ['손상', '안드로이드'] }]),
       resolve: s => { s.memo.echoVisits = (s.memo.echoVisits || 0) + 1; },
       outcomes: {
-        perfect: '"감사합니다. 이별이 지워졌습니다." 60₵. 에코가 문을 나서며 하얀 복도 쪽 카드를 한 번 돌아본다. 그 카드는 지우라고 하지 않았다.',
+        perfect: '"감사합니다. 이별이 지워졌습니다." 80₵. 에코가 문을 나서며 하얀 복도 쪽 카드를 한 번 돌아본다. 그 카드는 지우라고 하지 않았다.',
         partial: '"발소리는 남겨 주셨군요."',
         damaged: '에코의 손가락이 허공에서 피아노를 치다 멈춘다.',
         refused: '"내일 다시 오겠습니다. 처음 뵙는 분께." 에코가 문에게 인사한다.',
@@ -499,7 +499,7 @@ registerAct({
       },
     },
     {
-      id: 'echo4', day: 6, who: 'echo', type: 'erase', pay: 60, meta: '가사 도우미 안드로이드 E-C0 · 네 번째',
+      id: 'echo4', day: 6, who: 'echo', type: 'erase', pay: 80, meta: '가사 도우미 안드로이드 E-C0 · 네 번째',
       cond: s => !['reported'].includes(s.outcomes.echo1) && !['reported'].includes(s.outcomes.echo2) && !['reported'].includes(s.outcomes.echo3),
       talk: [
         T('echo', '처음 뵙겠습니다. 가사 도우미 E-C0, 에코입니다.'),
@@ -554,6 +554,7 @@ registerAct({
           { t: '모르는 게 나을 수도 있어요.', once: true, then: [T('doyun', '기자한테 그런 말은 안 통해요.'), N('그가 웃는다. 그 웃음이 은재와 닮았다.')] },
           { t: '내일 다시 오세요. 둘이서.', end: true },
         ]),
+        DO(s => gain(100, '권도윤 상담료')),
       ],
     },
 
@@ -597,12 +598,12 @@ registerAct({
             SHOW('doyun'), N('도윤이 의자에서 일어나 무릎을 굽힌다. 왜 그러는지 본인도 모르는 얼굴로.'),
             T('doyun', '…올라올래?'), SHOW('eunjae'), N('은재가 아빠 어깨 위에 올라간다. 도윤이 비틀거린다. 서툴다. 처음 하는 사람처럼.'),
             T('eunjae', '우리 아빠는 진실을 쓰는 사람!'), N('도윤이 운다. 왜 우는지 모르는 얼굴로.'),
-            N('시술소 천장이 낮아서, 은재의 머리가 전등에 닿을 뻔한다.')] },
+            N('시술소 천장이 낮아서, 은재의 머리가 전등에 닿을 뻔한다.'), DO(s => gain(150, '권도윤 시술비'))] },
           { t: '둘 다 편하게 잊게 둔다 (은재의 아빠 기억 삭제 · [미성년] 벌점 +1)', do: s => { s.flags.doyunFinal = 'forget'; addPenalty('[미성년] 기억 삭제 (은재)'); s.trust.eunjae = 0; }, then: [
             N('도윤이 동의서에 서명한다. 자기가 누구의 아빠인지 모르는 채로.'), N('은재가 눈을 뜬다. 안경 쓴 아저씨를 보고 꾸벅 인사한다. 남남의 인사.'),
-            N('두 사람은 같은 문으로 나가서, 다른 방향으로 걸어간다.')] },
+            N('두 사람은 같은 문으로 나가서, 다른 방향으로 걸어간다.'), DO(s => gain(150, '권도윤 시술비'))] },
           { t: '아무것도 하지 않는다 — 떨어진 채로', do: s => { s.flags.doyunFinal = 'apart'; }, then: [
-            T('eunjae', '…저 그냥 아빠 기사 읽을래요. 매일.'), SHOW('doyun'), T('doyun', '…그럼 매일 쓸게.'), N('거리 하나만큼 떨어져서, 둘이 나간다.')] },
+            T('eunjae', '…저 그냥 아빠 기사 읽을래요. 매일.'), SHOW('doyun'), T('doyun', '…그럼 매일 쓸게.'), N('거리 하나만큼 떨어져서, 둘이 나간다.'), DO(s => gain(100, '권도윤 상담료'))] },
         ]),
       ],
     },

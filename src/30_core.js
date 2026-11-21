@@ -242,13 +242,13 @@ function closeModal() { state.modalOpen = false; $('#modal').classList.remove('o
 
 function updateHUD() {
   const hud = $('#hud');
-  hud.classList.toggle('minimal', state.screen === 'title');
+  hud.classList.toggle('minimal', ['title', 'gallery', 'drawings'].includes(state.screen));
   $('#hudDay').textContent = `${state.day}/${CONFIG.totalDays}`;
   $('#hudMoney').textContent = state.money;
   $('#hudPen').textContent = '●'.repeat(Math.min(state.penalty, CONFIG.penaltyLimit)) + '○'.repeat(Math.max(0, CONFIG.penaltyLimit - state.penalty));
   $('#hudName').innerHTML = playerName();
   $('#hudClue').textContent = `${state.clues.length}/${Object.keys(CLUES).length}`;
-  $('#hudAct').textContent = state.screen === 'title' ? '' : `${actOf(state.day)}막 · ${ACTS[actOf(state.day)].title}`;
+  $('#hudAct').textContent = ['title', 'gallery', 'drawings'].includes(state.screen) ? '' : `${actOf(state.day)}막 · ${ACTS[actOf(state.day)].title}`;
   $('#hudLicense').textContent = state.screen === 'title' ? '' : ' // ' + CONFIG.license;
   $('#muteBtn').textContent = state.muted ? '🔇 음소거' : '🔊 소리';
   syncHudHeight();

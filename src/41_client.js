@@ -50,7 +50,7 @@ function startTreatment() {
   treat.classList.remove('hidden');
   treat.innerHTML = `
     <div class="request">${fx(textOf(data.request))}</div>
-    <div class="rules-mini">유효 규칙: ${rules.list.map(r => `<span>${r.day}일 ${esc(r.title)}</span>`).join('')}${vipExempt ? '<span class="c-yel">· 임원 VIP</span>' : ''}${rules.registry && !data.exempt ? '<span class="c-mag">· 지운 기억은 보안국에 사본 제출</span>' : ''}</div>
+    <div class="rules-mini">유효 규칙: ${rules.list.filter(r => r.day === state.day || (r.forbidTags || []).concat(r.reportTags || []).some(t => c.cards.some(cd => cd.tags.includes(t)))).map(r => `<span>${r.day}일 ${esc(r.title)}</span>`).join('')}<span class="c-dim">(전체 ${rules.list.length}개)</span>${vipExempt ? '<span class="c-yel">· 임원 VIP</span>' : ''}${rules.registry && !data.exempt ? '<span class="c-mag">· 지운 기억은 보안국에 사본 제출</span>' : ''}</div>
     ${data.tutorial ? `<div class="tutorial">${esc(data.tutorial)}</div>` : ''}
     ${data.noGauge ? '<div class="tutorial" style="border-color:var(--mag);color:var(--mag)">이번 시술은 아무도 지켜보지 않는다. 화면에는 당신의 심박만 남는다.</div>' : ''}
     <div class="label">${esc(data.cardsLabel || '기억 장면 카드')} — ${c.cards.length}개${isOffer ? '' : ' · 지울 장면을 선택'}</div>
