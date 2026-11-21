@@ -26,6 +26,7 @@ const CLUE = id => ({ clue: id });
 const TRUST = (who, n) => ({ do: s => addTrust(who, n) });
 const DRAW = id => ({ do: () => addDrawing(id) });
 const PAUSE = ms => ({ pause: ms });
+const DONATE = (id, to) => ({ do: () => donate(id, to) });
 
 const CONFIG = {
   totalDays: 10,
@@ -56,7 +57,7 @@ const actOf = day => (day <= 3 ? 1 : day <= 7 ? 2 : 3);
 
 const EXPENSES = [
   { id: 'rent', name: '월세', cost: () => 100, desc: '미납 시 다음 날 경찰 스캔 +30% · 누적 3회 벌점 1' },
-  { id: 'life', name: '하린 생명유지 비용', cost: s => (s.day >= 6 ? 180 : 150), desc: '미납 시 하린 상태 악화 · 위독에서 또 미납하면 끝' },
+  { id: 'life', name: '하린 생명유지 비용', cost: s => (s.memo.lifeFree ? 0 : s.day >= 6 ? 180 : 150), desc: '미납 시 하린 상태 악화 · 위독에서 또 미납하면 끝' },
 ];
 
 const HARIN_STATES = [

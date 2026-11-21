@@ -72,7 +72,7 @@ function startTreatment() {
       <button class="btn mag" id="actMain" type="button" disabled>${esc(data.eraseLabel || '⌫ 삭제 실행')} (0)</button>
       ${extra.map((a, i) => `<button class="btn yel" data-extra="${i}" type="button">${esc(a.label)}</button>`).join('')}
       ${rules.registry && !data.exempt ? '<button class="btn" id="actForge" type="button">🗂 빈 사본 제출 (스캔 +25%)</button>' : ''}
-      <button class="btn" id="actRefuse" type="button">${esc(data.refuseLabel || '✋ 돌려보내기')}</button>
+      <button class="btn" id="actRefuse" type="button">${esc(textOf(data.refuseLabel) || '✋ 돌려보내기')}</button>
       ${data.noReport ? '' : '<button class="btn yel" id="actReport" type="button">📡 신고하기</button>'}`;
 
   if (!isOffer) {
@@ -112,6 +112,7 @@ function startTreatment() {
     if (a.doneLabel) b.textContent = a.doneLabel;
     Sound.erase();
     if (a.note) toast(a.note, 'info');
+    if (a.finish) resolveClient(a.finish);
   }));
   treat.scrollIntoView({ behavior: 'smooth', block: 'start' });
   if (!data.noGauge) startScan();

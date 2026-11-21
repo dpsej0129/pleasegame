@@ -245,7 +245,7 @@ function showDive(n, then) {
       const steps = lost ? [N(`${r.name}. …였던 곳. 회색 잡음만 가득하다.`), N('하린의 실루엣이 그 앞에서 멈춰 선다. 돌아보지 않는다.'), T('harinDream', '여기… 뭐가 있었는데.'),
         ...(r.lostSteps || [])] : r.steps;
       runScript(steps, () => {
-        if (!lost && !state.diveSeen.includes(key)) { state.diveSeen.push(key); state.resonance += r.reso || 1; $('#resoVal').textContent = state.resonance; Sound.coin(); }
+        if (!lost && !state.diveSeen.includes(key)) { state.diveSeen.push(key); state.resonance += (r.reso === undefined ? 1 : textOf(r.reso)); $('#resoVal').textContent = state.resonance; Sound.coin(); }
         setBg(dv.bg, { dream: true });
         renderRooms();
       });
