@@ -30,7 +30,7 @@ const DONATE = (id, to) => ({ do: () => donate(id, to) });
 
 const CONFIG = {
   totalDays: 10,
-  startMoney: 200,
+  startMoney: 300,
   scanSeconds: 40,
   scanDangerPct: 80,
   penaltyLimit: 5,
